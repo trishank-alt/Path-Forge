@@ -17,14 +17,14 @@ interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSaveSettings: (settings: {
-    provider: "gemini" | "openai" | "deterministic";
+    provider: "gemini" | "openai" | "deterministic" | "groq";
     apiKey: string;
     modelName: string;
   }) => void;
 }
 
 export function SettingsModal({ isOpen, onClose, onSaveSettings }: SettingsModalProps) {
-  const [provider, setProvider] = useState<"gemini" | "openai" | "deterministic">("gemini");
+  const [provider, setProvider] = useState<"gemini" | "openai" | "deterministic" | "groq">("gemini");
   const [apiKey, setApiKey] = useState("");
   const [modelName, setModelName] = useState("gemini-2.5-flash");
   const [showKey, setShowKey] = useState(false);
@@ -85,7 +85,7 @@ export function SettingsModal({ isOpen, onClose, onSaveSettings }: SettingsModal
           {/* Provider Selector */}
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-slate-300">Model Provider:</label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <button
                 type="button"
                 onClick={() => {
@@ -100,6 +100,22 @@ export function SettingsModal({ isOpen, onClose, onSaveSettings }: SettingsModal
               >
                 <span className="block font-bold">Google Gemini</span>
                 <span className="text-[10px] text-slate-400">Primary / Flash</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setProvider("groq");
+                  setModelName("openai/gpt-oss-120b");
+                }}
+                className={`p-3 rounded-xl border text-left text-xs font-semibold transition-all ${
+                  provider === "groq"
+                    ? "bg-amber-500/20 border-amber-500/40 text-amber-300 shadow-sm"
+                    : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <span className="block font-bold">Groq LPU</span>
+                <span className="text-[10px] text-slate-400">GPT-OSS 120B / Fast</span>
               </button>
 
               <button
@@ -139,14 +155,48 @@ export function SettingsModal({ isOpen, onClose, onSaveSettings }: SettingsModal
           {/* Model Name */}
           {provider !== "deterministic" && (
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-300">Model Name:</label>
+              <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+                <span>Model Name:</span>
+                {provider === "groq" && (
+                  <span className="text-[10px] text-amber-400">Active Groq Models</span>
+                )}
+              </label>
               <input
                 type="text"
                 value={modelName}
                 onChange={(e) => setModelName(e.target.value)}
-                placeholder={provider === "gemini" ? "gemini-2.5-flash" : "gpt-4o-mini"}
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-500"
+                placeholder={
+                  provider === "gemini"
+                    ? "gemini-2.5-flash"
+                    : provider === "groq"
+                    ? "openai/gpt-oss-120b"
+                    : "gpt-4o-mini"
+                }
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
               />
+              {provider === "groq" && (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {[
+                    { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B (Recommended)" },
+                    { id: "openai/gpt-oss-20b", label: "GPT-OSS 20B (Fast)" },
+                    { id: "qwen/qwen3.6-27b", label: "Qwen 3.6 27B" },
+                    { id: "groq/compound", label: "Groq Compound" },
+                  ].map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setModelName(m.id)}
+                      className={`text-[10px] px-2 py-0.5 rounded-md border transition-all ${
+                        modelName === m.id
+                          ? "bg-amber-500/20 border-amber-500/50 text-amber-300 font-semibold"
+                          : "bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -154,8 +204,14 @@ export function SettingsModal({ isOpen, onClose, onSaveSettings }: SettingsModal
           {provider !== "deterministic" && (
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
-                <span>{provider === "gemini" ? "Google Gemini API Key:" : "OpenAI API Key:"}</span>
-                <span className="text-[10px] text-slate-400">Kept for this browser session only</span>
+                <span>
+                  {provider === "gemini"
+                    ? "Google Gemini API Key:"
+                    : provider === "groq"
+                    ? "Groq API Key:"
+                    : "OpenAI API Key:"}
+                </span>
+                <span className="text-[10px] text-slate-400">Leave empty to use server .env.local</span>
               </label>
               <div className="relative">
                 <input
@@ -164,8 +220,10 @@ export function SettingsModal({ isOpen, onClose, onSaveSettings }: SettingsModal
                   onChange={(e) => setApiKey(e.target.value)}
                   placeholder={
                     provider === "gemini"
-                      ? "AIzaSy... (or set GEMINI_API_KEY in env)"
-                      : "sk-... (or set OPENAI_API_KEY in env)"
+                      ? "AIzaSy... (or uses GEMINI_API_KEY from server)"
+                      : provider === "groq"
+                      ? "gsk_... (or uses GROQ_API_KEY from server)"
+                      : "sk-... (or uses OPENAI_API_KEY from server)"
                   }
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-3 pr-10 py-2 text-xs text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
                 />

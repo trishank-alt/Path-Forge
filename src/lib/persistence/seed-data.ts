@@ -3,6 +3,7 @@ import {
   SkillEdge,
   LearningResource,
   PracticalProject,
+  TechnologyEcosystem,
 } from "../contracts";
 
 export interface PathDefinition {
@@ -13,6 +14,10 @@ export interface PathDefinition {
   targetSkillWeights: Record<string, number>; // skillId -> weight (0.0 to 1.0)
   defaultAssumptions: string[];
   requiredDimensions: string[]; // decision dimensions needed for committed path
+  technologyEcosystem?: TechnologyEcosystem;
+  supportedRoles?: string[];
+  supportedDomains?: string[];
+  supportedSpecializations?: string[];
 }
 
 // ==========================================
@@ -26,6 +31,31 @@ export const SEEDED_PATHS: PathDefinition[] = [
     domain: "enterprise_software",
     description:
       "Design robust, highly scalable, enterprise-grade Java backends with Spring Boot, relational data modeling, transactional workflows, and ERP integrations.",
+    technologyEcosystem: "java_spring",
+    supportedRoles: [
+      "backend_developer",
+      "backend_engineer",
+      "enterprise_architect",
+      "java_developer",
+      "erp_developer",
+      "backend_software_engineer",
+      "enterprise_java_developer",
+    ],
+    supportedDomains: [
+      "enterprise_software",
+      "enterprise_erp",
+      "enterprise",
+      "fintech",
+      "banking_systems",
+      "backend_software",
+      "erp",
+    ],
+    supportedSpecializations: [
+      "modular_monolith",
+      "transactional_workflows",
+      "erp_integrations",
+      "spring_boot",
+    ],
     targetSkillWeights: {
       java_core: 1.0,
       oop_design_patterns: 0.9,
@@ -59,6 +89,28 @@ export const SEEDED_PATHS: PathDefinition[] = [
     domain: "fullstack_software",
     description:
       "Build complete end-to-end applications combining responsive web frontends (HTML, CSS, TypeScript, React) with resilient backend services (Java, Node.js, REST APIs, SQL).",
+    technologyEcosystem: "agnostic",
+    supportedRoles: [
+      "fullstack_engineer",
+      "full_stack_developer",
+      "web_developer",
+      "frontend_engineer",
+      "software_engineer",
+      "fullstack_developer",
+    ],
+    supportedDomains: [
+      "fullstack_software",
+      "web_applications",
+      "frontend_web",
+      "saas_web",
+      "enterprise_software",
+      "web_development",
+    ],
+    supportedSpecializations: [
+      "responsive_web",
+      "spa_architecture",
+      "client_server_fullstack",
+    ],
     targetSkillWeights: {
       programming_fundamentals: 1.0,
       html_css_modern_layouts: 1.0,
@@ -88,6 +140,29 @@ export const SEEDED_PATHS: PathDefinition[] = [
     domain: "systems_engineering",
     description:
       "Master low-level systems programming, memory management, concurrent algorithms, and high-throughput software architecture with Modern C++.",
+    technologyEcosystem: "cpp",
+    supportedRoles: [
+      "systems_engineer",
+      "systems_software_engineer",
+      "cpp_developer",
+      "low_level_engineer",
+      "performance_engineer",
+      "embedded_systems_engineer",
+      "game_engine_developer",
+    ],
+    supportedDomains: [
+      "systems_engineering",
+      "systems",
+      "low_level_software",
+      "embedded",
+      "high_performance",
+      "systems_software",
+    ],
+    supportedSpecializations: [
+      "low_level_concurrency",
+      "memory_safety_raii",
+      "zero_cost_abstractions",
+    ],
     targetSkillWeights: {
       programming_fundamentals: 1.0,
       cpp_core_memory_management: 1.0,
@@ -115,6 +190,30 @@ export const SEEDED_PATHS: PathDefinition[] = [
     domain: "saas_web_products",
     description:
       "Build high-throughput, agile web APIs and full-stack services with TypeScript, Node.js, Fastify/Express, PostgreSQL, and cloud deployments.",
+    technologyEcosystem: "typescript_node",
+    supportedRoles: [
+      "backend_developer",
+      "backend_engineer",
+      "nodejs_developer",
+      "typescript_developer",
+      "web_api_developer",
+      "saas_backend_developer",
+      "backend_software_engineer",
+    ],
+    supportedDomains: [
+      "saas_web_products",
+      "saas_web",
+      "web_apis",
+      "modern_saas",
+      "backend_software",
+      "enterprise_software",
+    ],
+    supportedSpecializations: [
+      "microservices",
+      "rest_apis",
+      "realtime_websockets",
+      "cloud_deployments",
+    ],
     targetSkillWeights: {
       typescript_foundations: 1.0,
       nodejs_event_loop: 0.95,
@@ -147,6 +246,30 @@ export const SEEDED_PATHS: PathDefinition[] = [
     domain: "cloud_data_services",
     description:
       "Architect asynchronous APIs, data pipelines, and cloud-native services using Python, FastAPI, SQLAlchemy, and message queues.",
+    technologyEcosystem: "python_fastapi",
+    supportedRoles: [
+      "backend_developer",
+      "backend_engineer",
+      "python_developer",
+      "cloud_developer",
+      "data_backend_developer",
+      "async_api_developer",
+      "backend_software_engineer",
+    ],
+    supportedDomains: [
+      "cloud_data_services",
+      "cloud_data",
+      "cloud_backend",
+      "data_services",
+      "backend_software",
+      "enterprise_software",
+    ],
+    supportedSpecializations: [
+      "microservices",
+      "event_streams",
+      "asyncio",
+      "data_pipelines",
+    ],
     targetSkillWeights: {
       python_foundations: 1.0,
       asyncio_concurrency: 0.95,
@@ -178,6 +301,29 @@ export const SEEDED_PATHS: PathDefinition[] = [
     domain: "devops_infrastructure",
     description:
       "Design reliable CI/CD pipelines, container orchestration with Kubernetes/Docker, Infrastructure as Code, and automated cloud deployments.",
+    technologyEcosystem: "agnostic",
+    supportedRoles: [
+      "devops_engineer",
+      "cloud_platform_engineer",
+      "site_reliability_engineer",
+      "sre",
+      "infrastructure_engineer",
+      "platform_engineer",
+    ],
+    supportedDomains: [
+      "devops_infrastructure",
+      "cloud_platform",
+      "infrastructure",
+      "sre",
+      "cloud_devops",
+      "devops",
+    ],
+    supportedSpecializations: [
+      "ci_cd_pipelines",
+      "infrastructure_as_code",
+      "container_orchestration",
+      "cloud_hardening",
+    ],
     targetSkillWeights: {
       linux_networking_fundamentals: 1.0,
       docker_ci_cd: 1.0,
@@ -202,6 +348,29 @@ export const SEEDED_PATHS: PathDefinition[] = [
     domain: "cybersecurity_defensive",
     description:
       "Master ethical vulnerability assessment, authorized lab testing, secure code review, and defensive validation to protect systems against advanced threats.",
+    technologyEcosystem: "agnostic",
+    supportedRoles: [
+      "cybersecurity_engineer",
+      "defensive_security_engineer",
+      "security_auditor",
+      "red_team_engineer",
+      "security_specialist",
+      "penetration_tester",
+    ],
+    supportedDomains: [
+      "cybersecurity_defensive",
+      "security",
+      "threat_modeling",
+      "application_security",
+      "network_security",
+      "infosec",
+    ],
+    supportedSpecializations: [
+      "vulnerability_assessment",
+      "threat_modeling",
+      "defensive_hardening",
+      "ethical_hacking",
+    ],
     targetSkillWeights: {
       linux_networking_fundamentals: 1.0,
       authorized_lab_ethics: 1.0,
@@ -225,6 +394,65 @@ export const SEEDED_PATHS: PathDefinition[] = [
       "hours_per_week",
     ],
   },
+  {
+    id: "vlsi_design_engineer",
+    title: "VLSI & Digital IC Design Engineer",
+    domain: "hardware_semiconductor",
+    description:
+      "Design, simulate, synthesize, and verify digital integrated circuits, RISC-V microarchitectures, FPGA systems, and tapeout-ready ASICs using SystemVerilog and modern EDA toolchains.",
+    technologyEcosystem: "hardware_hdl",
+    supportedRoles: [
+      "vlsi_engineer",
+      "vlsi_design_engineer",
+      "rtl_design_engineer",
+      "asic_engineer",
+      "fpga_engineer",
+      "hardware_engineer",
+      "digital_design_engineer",
+      "verification_engineer",
+      "chip_designer",
+      "semiconductor_engineer",
+    ],
+    supportedDomains: [
+      "hardware_semiconductor",
+      "vlsi",
+      "asic",
+      "fpga",
+      "chip_design",
+      "semiconductor",
+      "digital_electronics",
+      "hardware_engineering",
+      "electronics",
+    ],
+    supportedSpecializations: [
+      "rtl_design",
+      "fpga_prototyping",
+      "asic_physical_design",
+      "uvm_verification",
+      "riscv_microarchitecture",
+      "static_timing_analysis",
+    ],
+    targetSkillWeights: {
+      digital_logic_fundamentals: 1.0,
+      verilog_systemverilog_hdl: 1.0,
+      computer_architecture_riscv: 0.95,
+      fpga_synthesis_toolchains: 0.9,
+      static_timing_analysis_sta: 0.9,
+      asic_physical_design_flow: 0.85,
+      uvm_verification_methodology: 0.85,
+    },
+    defaultAssumptions: [
+      "Targeting digital VLSI, RTL design, FPGA acceleration, or ASIC front-end/back-end workflows.",
+      "SystemVerilog/Verilog is the primary hardware description language.",
+      "Emphasis on timing closure, cycle-accurate simulation, and synthesisable RTL.",
+    ],
+    requiredDimensions: [
+      "primary_language",
+      "target_domain",
+      "architecture_preference",
+      "hours_per_week",
+    ],
+  },
 ];
 
 // ==========================================
@@ -242,6 +470,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Foundations",
     evidenceCriteria: ["Solved basic algorithmic problems", "Implemented recursive and iterative loops"],
     tags: ["basics", "logic", "algorithms"],
+    ecosystem: "agnostic",
   },
   {
     id: "data_structures_algorithms",
@@ -252,6 +481,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Foundations",
     evidenceCriteria: ["Implemented tree and graph traversals", "Analyzed algorithmic complexity with Big-O"],
     tags: ["dsa", "algorithms", "data_structures"],
+    ecosystem: "agnostic",
   },
   {
     id: "html_css_modern_layouts",
@@ -262,6 +492,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Web Frontend",
     evidenceCriteria: ["Built responsive mobile-first UI with Flexbox and Grid", "Adhered to semantic markup and WCAG standards"],
     tags: ["html", "css", "frontend", "responsive"],
+    ecosystem: "agnostic",
   },
   {
     id: "cpp_core_memory_management",
@@ -272,6 +503,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Systems & C++",
     evidenceCriteria: ["Wrote memory-safe C++ with RAII and smart pointers", "Implemented custom templated data structures"],
     tags: ["cpp", "systems", "memory", "raii"],
+    ecosystem: "cpp",
   },
   {
     id: "java_core",
@@ -282,6 +514,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Java Ecosystem",
     evidenceCriteria: ["Built multi-threaded Java applications", "Used Streams and Generics fluently"],
     tags: ["java", "jvm", "oop", "backend"],
+    ecosystem: "java_spring",
   },
   {
     id: "typescript_foundations",
@@ -292,6 +525,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "TypeScript Ecosystem",
     evidenceCriteria: ["Configured tsconfig.json in strict mode", "Created complex generic type mappings"],
     tags: ["typescript", "javascript", "typing"],
+    ecosystem: "typescript_node",
   },
   {
     id: "python_foundations",
@@ -302,6 +536,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Python Ecosystem",
     evidenceCriteria: ["Wrote Python modules with type hints", "Created custom context managers and decorators"],
     tags: ["python", "language", "backend"],
+    ecosystem: "python_fastapi",
   },
   {
     id: "oop_design_patterns",
@@ -312,6 +547,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Architecture & Design",
     evidenceCriteria: ["Refactored procedural code into clean SOLID layers", "Implemented Repository and Unit of Work"],
     tags: ["solid", "clean_code", "design_patterns"],
+    ecosystem: "agnostic",
   },
 
   // ─── Networking & Protocols ─────────────────────────────
@@ -324,6 +560,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Networking & Protocols",
     evidenceCriteria: ["Designed RESTful endpoints adhering to RFC standards", "Configured correct cache-control and auth headers"],
     tags: ["http", "rest", "protocols", "api"],
+    ecosystem: "agnostic",
   },
   {
     id: "rest_api_design",
@@ -334,6 +571,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "API Architecture",
     evidenceCriteria: ["Authored complete OpenAPI 3.1 specification", "Built standardized RFC 7807 error responses"],
     tags: ["rest", "openapi", "api_design"],
+    ecosystem: "agnostic",
   },
   {
     id: "websockets_realtime",
@@ -344,6 +582,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Networking & Protocols",
     evidenceCriteria: ["Implemented bi-directional WebSocket server with authentication and reconnect handling"],
     tags: ["websockets", "realtime", "events"],
+    ecosystem: "typescript_node",
   },
   {
     id: "graphql_apis",
@@ -354,6 +593,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "API Architecture",
     evidenceCriteria: ["Built GraphQL schema with DataLoader to solve N+1 queries"],
     tags: ["graphql", "schema", "api"],
+    ecosystem: "agnostic",
   },
 
   // ─── Databases & Persistence ────────────────────────────
@@ -366,6 +606,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Databases & Storage",
     evidenceCriteria: ["Designed 3NF database schema with foreign keys and indexes", "Optimized complex multi-table JOIN queries"],
     tags: ["sql", "postgres", "relational", "acid"],
+    ecosystem: "agnostic",
   },
   {
     id: "database_migrations",
@@ -376,6 +617,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Databases & Storage",
     evidenceCriteria: ["Executed backward-compatible database schema migrations with automated tooling"],
     tags: ["migrations", "flyway", "prisma_migrate", "devops"],
+    ecosystem: "agnostic",
   },
   {
     id: "spring_data_jpa",
@@ -386,6 +628,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Java Ecosystem",
     evidenceCriteria: ["Built JPA entity graphs avoiding N+1 selects", "Managed transactional boundaries with @Transactional"],
     tags: ["jpa", "hibernate", "spring_data", "orm"],
+    ecosystem: "java_spring",
   },
   {
     id: "prisma_drizzle_orm",
@@ -396,6 +639,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "TypeScript Ecosystem",
     evidenceCriteria: ["Implemented complex type-safe relational queries with Prisma / Drizzle"],
     tags: ["prisma", "drizzle", "typescript", "orm"],
+    ecosystem: "typescript_node",
   },
   {
     id: "sqlalchemy_alembic",
@@ -406,6 +650,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Python Ecosystem",
     evidenceCriteria: ["Configured async SQLAlchemy session with connection pooling and Alembic revisions"],
     tags: ["sqlalchemy", "alembic", "python", "orm"],
+    ecosystem: "python_fastapi",
   },
   {
     id: "redis_caching",
@@ -416,6 +661,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Databases & Storage",
     evidenceCriteria: ["Implemented cache-aside pattern with TTL and atomic rate limiting in Redis"],
     tags: ["redis", "cache", "performance"],
+    ecosystem: "agnostic",
   },
   {
     id: "distributed_caching",
@@ -426,6 +672,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Databases & Storage",
     evidenceCriteria: ["Configured multi-node distributed cache with locking and stampede mitigation"],
     tags: ["caching", "distributed_systems", "enterprise"],
+    ecosystem: "agnostic",
   },
 
   // ─── Web Frameworks & Engines ───────────────────────────
@@ -438,6 +685,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Java Ecosystem",
     evidenceCriteria: ["Built Spring Boot service with custom configuration and actuator health checks"],
     tags: ["spring_boot", "java", "ioc", "framework"],
+    ecosystem: "java_spring",
   },
   {
     id: "nodejs_event_loop",
@@ -448,6 +696,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "TypeScript Ecosystem",
     evidenceCriteria: ["Built non-blocking streaming data pipeline with backpressure control"],
     tags: ["nodejs", "event_loop", "streams", "async"],
+    ecosystem: "typescript_node",
   },
   {
     id: "fastify_express",
@@ -458,6 +707,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "TypeScript Ecosystem",
     evidenceCriteria: ["Built modular Fastify server with schema validation and plugin encapsulation"],
     tags: ["fastify", "express", "nodejs", "api"],
+    ecosystem: "typescript_node",
   },
   {
     id: "fastapi_framework",
@@ -468,6 +718,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Python Ecosystem",
     evidenceCriteria: ["Built production FastAPI application with strict Pydantic schemas and dependency overrides"],
     tags: ["fastapi", "python", "pydantic", "api"],
+    ecosystem: "python_fastapi",
   },
   {
     id: "asyncio_concurrency",
@@ -478,6 +729,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Python Ecosystem",
     evidenceCriteria: ["Implemented concurrent async task processor using asyncio.TaskGroup"],
     tags: ["asyncio", "python", "concurrency"],
+    ecosystem: "python_fastapi",
   },
   {
     id: "pydantic_validation",
@@ -488,6 +740,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Python Ecosystem",
     evidenceCriteria: ["Created complex nested Pydantic models with custom pre/post validators"],
     tags: ["pydantic", "python", "validation"],
+    ecosystem: "python_fastapi",
   },
 
   // ─── Testing & Quality ──────────────────────────────────
@@ -500,6 +753,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Testing & Quality",
     evidenceCriteria: ["Achieved >80% code coverage using unit and database integration tests with Testcontainers"],
     tags: ["testing", "junit", "vitest", "pytest", "mocking"],
+    ecosystem: "agnostic",
   },
 
   // ─── Security & Authentication ──────────────────────────
@@ -512,6 +766,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Security & Auth",
     evidenceCriteria: ["Implemented OAuth2 resource server with RBAC role authorization on endpoints"],
     tags: ["spring_security", "jwt", "oauth2", "rbac"],
+    ecosystem: "java_spring",
   },
   {
     id: "jwt_oauth_security",
@@ -522,6 +777,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Security & Auth",
     evidenceCriteria: ["Implemented secure JWT refresh-token rotation with Redis-backed blocklist"],
     tags: ["jwt", "auth", "security", "cors"],
+    ecosystem: "agnostic",
   },
 
   // ─── DevOps, Containers & Deployment ────────────────────
@@ -534,6 +790,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "DevOps & Infrastructure",
     evidenceCriteria: ["Created multi-stage Dockerfile producing <100MB production image and automated GitHub Actions pipeline"],
     tags: ["docker", "ci_cd", "github_actions", "containers"],
+    ecosystem: "agnostic",
   },
   {
     id: "cloud_deployment_aws",
@@ -544,6 +801,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "DevOps & Infrastructure",
     evidenceCriteria: ["Deployed containerized service on Cloud Run / AWS ECS with managed Postgres"],
     tags: ["aws", "gcp", "cloud", "devops"],
+    ecosystem: "agnostic",
   },
 
   // ─── Messaging, Microservices & Workflows ───────────────
@@ -556,6 +814,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Distributed Systems",
     evidenceCriteria: ["Built asynchronous message producer and consumer with idempotent deduplication and retry queues"],
     tags: ["kafka", "rabbitmq", "messaging", "events"],
+    ecosystem: "agnostic",
   },
   {
     id: "celery_redis_queues",
@@ -566,6 +825,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Python Ecosystem",
     evidenceCriteria: ["Built Celery background task worker with exponential backoff retries"],
     tags: ["celery", "redis", "queues", "workers"],
+    ecosystem: "python_fastapi",
   },
   {
     id: "erp_state_machine_workflows",
@@ -576,6 +836,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Enterprise Workflows",
     evidenceCriteria: ["Implemented transactional state machine with optimistic locking and full audit ledger"],
     tags: ["erp", "state_machine", "audit_log", "fintech"],
+    ecosystem: "java_spring",
   },
 
   // ─── Defensive Cybersecurity Track ──────────────────────
@@ -588,6 +849,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Cybersecurity Defensive",
     evidenceCriteria: ["Configured isolated virtual lab network with strict egress boundaries"],
     tags: ["ethics", "lab_setup", "compliance"],
+    ecosystem: "agnostic",
   },
   {
     id: "linux_networking_fundamentals",
@@ -598,6 +860,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Cybersecurity Defensive",
     evidenceCriteria: ["Captured and analyzed network packet captures identifying anomalies"],
     tags: ["linux", "tcp_ip", "networking", "wireshark"],
+    ecosystem: "agnostic",
   },
   {
     id: "threat_modeling_owasp",
@@ -608,6 +871,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Cybersecurity Defensive",
     evidenceCriteria: ["Produced comprehensive STRIDE threat model and mitigation matrix for web architecture"],
     tags: ["threat_modeling", "owasp", "stride", "security"],
+    ecosystem: "agnostic",
   },
   {
     id: "secure_code_review",
@@ -618,6 +882,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Cybersecurity Defensive",
     evidenceCriteria: ["Identified and remediated 5 high-severity vulnerabilities during secure code review"],
     tags: ["sast", "code_audit", "secure_coding"],
+    ecosystem: "agnostic",
   },
   {
     id: "vulnerability_scanning_tools",
@@ -628,6 +893,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Cybersecurity Defensive",
     evidenceCriteria: ["Executed automated scan in lab and produced prioritized CVSS remediation report"],
     tags: ["vulnerability_assessment", "cvss", "zap"],
+    ecosystem: "agnostic",
   },
   {
     id: "web_security_mechanisms",
@@ -638,6 +904,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Cybersecurity Defensive",
     evidenceCriteria: ["Hardened web application achieving A+ rating on security headers analyzer"],
     tags: ["csp", "hsts", "defense_in_depth"],
+    ecosystem: "agnostic",
   },
   {
     id: "network_traffic_analysis",
@@ -648,6 +915,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Cybersecurity Defensive",
     evidenceCriteria: ["Authored custom Snort/Suricata detection rule matching simulated attack traffic"],
     tags: ["snort", "suricata", "ids_ips", "detection"],
+    ecosystem: "agnostic",
   },
   {
     id: "defensive_validation_hardening",
@@ -658,6 +926,7 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Cybersecurity Defensive",
     evidenceCriteria: ["Hardened Linux server and Docker host according to CIS Level 2 benchmark"],
     tags: ["hardening", "cis_benchmark", "selinux"],
+    ecosystem: "agnostic",
   },
   {
     id: "ctf_lab_methodology",
@@ -668,6 +937,86 @@ export const SEEDED_SKILLS: SkillNode[] = [
     category: "Cybersecurity Defensive",
     evidenceCriteria: ["Completed 3 authorized defensive CTF challenges with documented writeups"],
     tags: ["ctf", "methodology", "hands_on"],
+    ecosystem: "agnostic",
+  },
+
+  // ─── VLSI, Semiconductor & Hardware Engineering ─────────
+  {
+    id: "digital_logic_fundamentals",
+    title: "Digital Logic Design & Boolean Algebra",
+    domain: "hardware_semiconductor",
+    description: "Combinational logic, Karnaugh maps, sequential flip-flops, finite state machines (FSMs), and timing diagrams.",
+    level: 1,
+    category: "Hardware & VLSI",
+    evidenceCriteria: ["Designed Mealy and Moore state machines with setup/hold timing constraints", "Optimized Boolean equations"],
+    tags: ["digital_logic", "fsm", "boolean_algebra", "hardware"],
+    ecosystem: "hardware_hdl",
+  },
+  {
+    id: "verilog_systemverilog_hdl",
+    title: "Verilog & SystemVerilog for RTL Synthesis",
+    domain: "hardware_semiconductor",
+    description: "Synthesizable RTL coding guidelines, always_ff / always_comb blocks, interfaces, structural hierarchies, and parameterization.",
+    level: 2,
+    category: "Hardware & VLSI",
+    evidenceCriteria: ["Authored synthesizable RTL modules avoiding latch inferencing", "Implemented modular SystemVerilog interfaces"],
+    tags: ["verilog", "systemverilog", "rtl", "hdl"],
+    ecosystem: "hardware_hdl",
+  },
+  {
+    id: "computer_architecture_riscv",
+    title: "Computer Architecture & RISC-V Microarchitecture",
+    domain: "hardware_semiconductor",
+    description: "Instruction set architectures (RISC-V RV32I), pipelining (Fetch/Decode/Execute/Memory/Writeback), hazard detection, and forwarding paths.",
+    level: 3,
+    category: "Hardware & VLSI",
+    evidenceCriteria: ["Designed a 5-stage pipelined RISC-V processor core with data forwarding", "Analyzed instruction throughput and branch penalty"],
+    tags: ["riscv", "cpu_architecture", "pipelining", "microarchitecture"],
+    ecosystem: "hardware_hdl",
+  },
+  {
+    id: "fpga_synthesis_toolchains",
+    title: "FPGA Synthesis, Vivado & Emulation Toolchains",
+    domain: "hardware_semiconductor",
+    description: "Synthesis constraints (XDC/SDC), LUT and Block RAM utilization, clock management (MMCM/PLL), and hardware debugging with ILA.",
+    level: 3,
+    category: "Hardware & VLSI",
+    evidenceCriteria: ["Synthesized and programmed FPGA bitstream with timing closure", "Integrated AXI4 bus peripherals on FPGA fabric"],
+    tags: ["fpga", "xilinx_vivado", "synthesis", "bitstream"],
+    ecosystem: "hardware_hdl",
+  },
+  {
+    id: "static_timing_analysis_sta",
+    title: "Static Timing Analysis & Clock Domain Crossing (CDC)",
+    domain: "hardware_semiconductor",
+    description: "Setup and hold slack equations, clock skew/jitter, synchronizers for asynchronous clock boundaries, and multicycle paths.",
+    level: 4,
+    category: "Hardware & VLSI",
+    evidenceCriteria: ["Resolved setup/hold timing violations across PVT corners", "Designed 2-flop and FIFO CDC synchronizers"],
+    tags: ["sta", "timing_closure", "cdc", "clocking"],
+    ecosystem: "hardware_hdl",
+  },
+  {
+    id: "asic_physical_design_flow",
+    title: "ASIC Physical Design & OpenROAD Tapeout Flow",
+    domain: "hardware_semiconductor",
+    description: "Floorplanning, power distribution networks (PDN), placement, clock tree synthesis (CTS), routing, and DRC/LVS physical verification.",
+    level: 4,
+    category: "Hardware & VLSI",
+    evidenceCriteria: ["Generated GDSII tapeout layout using open-source OpenROAD / SkyWater 130nm PDK", "Achieved zero DRC/LVS violations"],
+    tags: ["asic", "physical_design", "tapeout", "openroad", "gdsii"],
+    ecosystem: "hardware_hdl",
+  },
+  {
+    id: "uvm_verification_methodology",
+    title: "SystemVerilog UVM & Functional Verification",
+    domain: "hardware_semiconductor",
+    description: "Universal Verification Methodology (UVM), constrained random stimulus generation, functional coverage, scoreboards, and assertions (SVA).",
+    level: 4,
+    category: "Hardware & VLSI",
+    evidenceCriteria: ["Constructed complete UVM testbench with driver, monitor, scoreboard, and 100% functional coverage", "Authored SystemVerilog Assertions"],
+    tags: ["uvm", "verification", "coverage", "assertions"],
+    ecosystem: "hardware_hdl",
   },
 ];
 
@@ -869,6 +1218,56 @@ export const SEEDED_EDGES: SkillEdge[] = [
     minimumLevel: "working",
     rationale: "Threat modeling identifies attack surfaces needed during secure code review.",
   },
+
+  // Hardware & VLSI Ecosystem
+  {
+    id: "edge_logic_to_verilog",
+    fromSkillId: "digital_logic_fundamentals",
+    toSkillId: "verilog_systemverilog_hdl",
+    type: "required",
+    minimumLevel: "working",
+    rationale: "Digital logic gates and FSM concepts are fundamental before writing synthesizable RTL.",
+  },
+  {
+    id: "edge_verilog_to_riscv",
+    fromSkillId: "verilog_systemverilog_hdl",
+    toSkillId: "computer_architecture_riscv",
+    type: "required",
+    minimumLevel: "working",
+    rationale: "SystemVerilog proficiency is required to implement processor microarchitecture.",
+  },
+  {
+    id: "edge_verilog_to_fpga",
+    fromSkillId: "verilog_systemverilog_hdl",
+    toSkillId: "fpga_synthesis_toolchains",
+    type: "required",
+    minimumLevel: "working",
+    rationale: "RTL code is the primary input for FPGA synthesis and bitstream generation.",
+  },
+  {
+    id: "edge_verilog_to_sta",
+    fromSkillId: "verilog_systemverilog_hdl",
+    toSkillId: "static_timing_analysis_sta",
+    type: "required",
+    minimumLevel: "working",
+    rationale: "Understanding RTL registers and combinational paths is required for timing analysis.",
+  },
+  {
+    id: "edge_sta_to_asic",
+    fromSkillId: "static_timing_analysis_sta",
+    toSkillId: "asic_physical_design_flow",
+    type: "required",
+    minimumLevel: "working",
+    rationale: "Timing constraints and slack analysis drive physical placement and routing closure.",
+  },
+  {
+    id: "edge_verilog_to_uvm",
+    fromSkillId: "verilog_systemverilog_hdl",
+    toSkillId: "uvm_verification_methodology",
+    type: "required",
+    minimumLevel: "working",
+    rationale: "SystemVerilog object-oriented features form the basis of the UVM testbench architecture.",
+  },
 ];
 
 // ==========================================
@@ -889,6 +1288,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     qualityScore: 0.94,
     languageOrDomainMatch: "Java",
     description: "Comprehensive guide to modern Java features, memory management, and concurrent collections.",
+    ecosystem: "java_spring",
   },
   {
     id: "res_spring_boot_guides",
@@ -902,6 +1302,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     qualityScore: 0.96,
     languageOrDomainMatch: "Spring Boot / Java",
     description: "Official hands-on guides for building resilient REST APIs, configuration, and monitoring.",
+    ecosystem: "java_spring",
   },
   {
     id: "res_postgres_relational_guide",
@@ -914,6 +1315,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     durationHours: 10,
     qualityScore: 0.95,
     description: "Master relational normalization, B-Tree and GIN indexes, and query execution plan analysis.",
+    ecosystem: "agnostic",
   },
   {
     id: "res_spring_data_jpa_deep_dive",
@@ -927,6 +1329,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     qualityScore: 0.98,
     languageOrDomainMatch: "JPA / Hibernate",
     description: "Eliminate N+1 queries, master batching, entity graphs, and transactional boundaries.",
+    ecosystem: "java_spring",
   },
   {
     id: "res_junit_testcontainers",
@@ -939,6 +1342,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     durationHours: 6,
     qualityScore: 0.92,
     description: "Run lightweight, disposable database and message broker containers in automated tests.",
+    ecosystem: "agnostic",
   },
 
   // TypeScript / Node
@@ -954,6 +1358,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     qualityScore: 0.95,
     languageOrDomainMatch: "TypeScript",
     description: "In-depth reference on generative typing, discrimination unions, and advanced utility types.",
+    ecosystem: "typescript_node",
   },
   {
     id: "res_fastify_mastery",
@@ -966,6 +1371,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     durationHours: 7,
     qualityScore: 0.93,
     description: "Fast JSON schema serialization, lifecycle hooks, and plugin architecture in Node.js.",
+    ecosystem: "typescript_node",
   },
 
   // Python / FastAPI
@@ -981,6 +1387,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     qualityScore: 0.97,
     languageOrDomainMatch: "Python",
     description: "Step-by-step guide to building production asynchronous REST APIs with Pydantic validation.",
+    ecosystem: "python_fastapi",
   },
 
   // DevOps & Cloud Infrastructure
@@ -996,6 +1403,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     qualityScore: 0.95,
     languageOrDomainMatch: "Linux / Networking",
     description: "Deep dive into Linux process model, systemd, TCP/IP sockets, iptables, and shell automation.",
+    ecosystem: "agnostic",
   },
   {
     id: "res_docker_cicd_mastery",
@@ -1009,6 +1417,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     qualityScore: 0.96,
     languageOrDomainMatch: "Docker / CI/CD",
     description: "Multi-stage Docker builds, image minimization, container registries, and automated test pipelines.",
+    ecosystem: "agnostic",
   },
   {
     id: "res_aws_cloud_infra",
@@ -1022,6 +1431,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     qualityScore: 0.94,
     languageOrDomainMatch: "AWS / Cloud",
     description: "Deploying resilient container workloads, CloudFormation/Terraform IaC, VPC networking, and IAM.",
+    ecosystem: "agnostic",
   },
   {
     id: "res_cis_hardening_benchmarks",
@@ -1034,6 +1444,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     durationHours: 8,
     qualityScore: 0.93,
     description: "Hardening Linux hosts, rootless Docker containers, kernel parameters, and automated compliance checks.",
+    ecosystem: "agnostic",
   },
 
   // Full-Stack & Frontend
@@ -1049,6 +1460,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     qualityScore: 0.95,
     languageOrDomainMatch: "HTML / CSS",
     description: "Master modern responsive layouts, accessibility standards (WCAG), CSS variables, and mobile-first design.",
+    ecosystem: "agnostic",
   },
   {
     id: "res_programming_fundamentals",
@@ -1061,6 +1473,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     durationHours: 12,
     qualityScore: 0.97,
     description: "Algorithmic thinking, memory models, control flow, functions, and structured problem decomposition.",
+    ecosystem: "agnostic",
   },
 
   // Systems & C++
@@ -1076,6 +1489,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     qualityScore: 0.96,
     languageOrDomainMatch: "Modern C++",
     description: "Master pointers, stack vs heap, RAII resource management, custom allocators, and move semantics.",
+    ecosystem: "cpp",
   },
   {
     id: "res_dsa_algorithms",
@@ -1088,6 +1502,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     durationHours: 16,
     qualityScore: 0.96,
     description: "Trees, graphs, dynamic programming, asymptotic analysis, and cache-friendly data structures.",
+    ecosystem: "agnostic",
   },
 
   // Defensive Cybersecurity
@@ -1103,6 +1518,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     qualityScore: 0.95,
     languageOrDomainMatch: "Cybersecurity",
     description: "Legal boundaries (CFAA, ISO 27001), rules of engagement, and safe virtualization of isolated penetration testing subnets.",
+    ecosystem: "agnostic",
   },
   {
     id: "res_cyber_packet_inspection",
@@ -1116,6 +1532,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     qualityScore: 0.94,
     languageOrDomainMatch: "Cybersecurity",
     description: "Deep dive into TCP handshake inspection, DNS tunneling detection, iptables firewalls, and socket auditing on Linux.",
+    ecosystem: "agnostic",
   },
   {
     id: "res_owasp_top10_lab",
@@ -1129,6 +1546,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     qualityScore: 0.96,
     languageOrDomainMatch: "Cybersecurity",
     description: "Understand root causes of modern web vulnerabilities and defensive countermeasures.",
+    ecosystem: "agnostic",
   },
   {
     id: "res_secure_code_review_guide",
@@ -1142,6 +1560,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     qualityScore: 0.93,
     languageOrDomainMatch: "Cybersecurity",
     description: "Techniques for auditing application source code and remediating flaws before production.",
+    ecosystem: "agnostic",
   },
   {
     id: "res_web_sec_headers",
@@ -1155,6 +1574,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     qualityScore: 0.95,
     languageOrDomainMatch: "Cybersecurity",
     description: "Deep dive into Content Security Policy (CSP), HTTP Strict Transport Security, CORS security, and Subresource Integrity.",
+    ecosystem: "agnostic",
   },
   {
     id: "res_vuln_scanning_tools",
@@ -1168,6 +1588,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     qualityScore: 0.92,
     languageOrDomainMatch: "Cybersecurity",
     description: "Automating dynamic application security testing (DAST) in isolated staging environments and interpreting CVSS scores.",
+    ecosystem: "agnostic",
   },
   {
     id: "res_snort_traffic_analysis",
@@ -1181,6 +1602,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     qualityScore: 0.94,
     languageOrDomainMatch: "Cybersecurity",
     description: "Writing signature-based intrusion detection rules, analyzing anomalous PCAP captures, and detecting reconnaissance scans.",
+    ecosystem: "agnostic",
   },
   {
     id: "res_defensive_hardening",
@@ -1194,6 +1616,7 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     qualityScore: 0.96,
     languageOrDomainMatch: "Cybersecurity",
     description: "Implementing least-privilege host configurations, disabling unnecessary capabilities, and configuring auditd profiles.",
+    ecosystem: "agnostic",
   },
   {
     id: "res_ctf_defense_methodology",
@@ -1207,6 +1630,107 @@ export const SEEDED_RESOURCES: LearningResource[] = [
     qualityScore: 0.95,
     languageOrDomainMatch: "Cybersecurity",
     description: "Structured challenge resolution, defense-in-depth verification, and clear post-mortem incident documentation.",
+    ecosystem: "agnostic",
+  },
+
+  // Hardware & VLSI
+  {
+    id: "res_digital_logic_nand2tetris",
+    skillId: "digital_logic_fundamentals",
+    title: "Digital Systems & Sequential Logic Architecture",
+    provider: "Nand2Tetris & MIT OpenCourseWare",
+    url: "https://www.nand2tetris.org/",
+    format: "interactive_course",
+    costType: "free",
+    durationHours: 14,
+    qualityScore: 0.96,
+    languageOrDomainMatch: "Digital Logic & VLSI",
+    description: "Boolean algebra, combinational gates, multiplexers, arithmetic units, sequential flip-flops, and FSM design.",
+    ecosystem: "hardware_hdl",
+  },
+  {
+    id: "res_systemverilog_chipverify",
+    skillId: "verilog_systemverilog_hdl",
+    title: "Synthesizable SystemVerilog for ASIC & FPGA Design",
+    provider: "ChipVerify & ASIC World",
+    url: "https://www.chipverify.com/systemverilog/systemverilog-tutorial",
+    format: "documentation",
+    costType: "free",
+    durationHours: 16,
+    qualityScore: 0.95,
+    languageOrDomainMatch: "SystemVerilog / HDL",
+    description: "RTL coding guidelines, always_ff / always_comb blocks, interfaces, structural hierarchies, and parameterization.",
+    ecosystem: "hardware_hdl",
+  },
+  {
+    id: "res_riscv_computer_arch",
+    skillId: "computer_architecture_riscv",
+    title: "Computer Organization and Design: RISC-V Edition",
+    provider: "Patterson & Hennessy / UC Berkeley",
+    url: "https://inst.eecs.berkeley.edu/~cs61c/",
+    format: "documentation",
+    costType: "free",
+    durationHours: 20,
+    qualityScore: 0.98,
+    languageOrDomainMatch: "RISC-V Architecture",
+    description: "RV32I base integer instruction set, 5-stage hazard-forwarding pipelining, and memory hierarchy.",
+    ecosystem: "hardware_hdl",
+  },
+  {
+    id: "res_fpga_vivado_openfpga",
+    skillId: "fpga_synthesis_toolchains",
+    title: "FPGA Design with Xilinx Vivado & Open-Source Toolchains",
+    provider: "Digilent / F4PGA / Yosys",
+    url: "https://yosyshq.net/",
+    format: "code_repository",
+    costType: "free",
+    durationHours: 18,
+    qualityScore: 0.93,
+    languageOrDomainMatch: "FPGA & Vivado",
+    description: "FPGA synthesis, bitstream generation, constraint files (XDC), block RAM instantiation, and hardware debugging.",
+    ecosystem: "hardware_hdl",
+  },
+  {
+    id: "res_sta_timing_closure",
+    skillId: "static_timing_analysis_sta",
+    title: "Static Timing Analysis for Nanometer Designs",
+    provider: "J. Bhasker & R. Chadha Guide",
+    url: "https://opentimer.github.io/",
+    format: "documentation",
+    costType: "free",
+    durationHours: 16,
+    qualityScore: 0.94,
+    languageOrDomainMatch: "Static Timing Analysis",
+    description: "Setup and hold slack equations, clock skew/jitter, synchronizers for asynchronous clock boundaries, and timing closure.",
+    ecosystem: "hardware_hdl",
+  },
+  {
+    id: "res_openroad_asic_tapeout",
+    skillId: "asic_physical_design_flow",
+    title: "OpenROAD & SkyWater 130nm ASIC Tapeout Flow",
+    provider: "The OpenROAD Project & Tiny Tapeout",
+    url: "https://theopenroadproject.org/",
+    format: "code_repository",
+    costType: "free",
+    durationHours: 22,
+    qualityScore: 0.97,
+    languageOrDomainMatch: "ASIC Physical Design",
+    description: "Floorplanning, power distribution networks (PDN), placement, clock tree synthesis (CTS), routing, and DRC/LVS physical verification.",
+    ecosystem: "hardware_hdl",
+  },
+  {
+    id: "res_uvm_verification_guide",
+    skillId: "uvm_verification_methodology",
+    title: "Universal Verification Methodology (UVM) Practical Cookbook",
+    provider: "Accellera & Verification Academy",
+    url: "https://verificationacademy.com/cookbook/uvm",
+    format: "documentation",
+    costType: "free",
+    durationHours: 20,
+    qualityScore: 0.96,
+    languageOrDomainMatch: "UVM Verification",
+    description: "Constrained random stimulus generation, functional coverage, scoreboards, drivers, monitors, and assertions (SVA).",
+    ecosystem: "hardware_hdl",
   },
 ];
 
@@ -1215,6 +1739,70 @@ export const SEEDED_RESOURCES: LearningResource[] = [
 // ==========================================
 
 export const SEEDED_PROJECTS: PracticalProject[] = [
+  // Hardware & VLSI Design
+  {
+    id: "proj_vlsi_riscv_core",
+    title: "RISC-V 32-bit Single-Cycle Core & ALU in SystemVerilog",
+    description:
+      "Design, implement, and verify a complete 32-bit RISC-V (RV32I) core with instruction decoder, register file, ALU, data memory interface, and cycle-accurate Verilator testbench.",
+    targetSkillIds: ["digital_logic_fundamentals", "verilog_systemverilog_hdl", "computer_architecture_riscv"],
+    deliverables: [
+      "Synthesizable SystemVerilog implementation of RV32I base integer instruction set",
+      "Parameterized register file (32 x 32-bit) with synchronous write and asynchronous read",
+      "Cycle-accurate Verilator simulation testbench executing compiled C/assembly test binaries",
+      "Waveform timing analysis (GTKWave) verifying zero data hazards",
+    ],
+    verificationChecklist: [
+      "Core executes RV32I compliance test suite (riscv-tests) with 100% pass rate",
+      "No inferred latches or unsynthesizable constructs in RTL linting (Verilator --lint-only)",
+      "Accurate instruction decoding verified on GTKWave trace",
+    ],
+    estimatedHours: 20,
+    domainContext: "Semiconductor Microarchitecture",
+    ecosystem: "hardware_hdl",
+  },
+  {
+    id: "proj_vlsi_fpga_soc",
+    title: "Pipelined RISC-V SoC with AXI-Lite Peripheral Bus on FPGA",
+    description:
+      "Transform the RISC-V core into a 5-stage hazard-forwarding pipeline, attach an AXI4-Lite bus with UART and GPIO memory-mapped peripherals, and synthesize the bitstream onto an FPGA target with timing closure.",
+    targetSkillIds: ["computer_architecture_riscv", "fpga_synthesis_toolchains", "static_timing_analysis_sta"],
+    deliverables: [
+      "5-stage pipelined microarchitecture with hazard detection unit and operand forwarding",
+      "AXI-Lite interconnect interconnecting CPU, 64KB SRAM, UART controller, and GPIO timer",
+      "XDC timing constraints file defining 50MHz input clock and IO delays",
+      "Synthesized bitstream deployed on FPGA with verified Hello World UART output",
+    ],
+    verificationChecklist: [
+      "Static timing report confirms positive setup slack (WNS > 0ns) and zero hold violations",
+      "UART transmission confirmed on serial terminal at 115200 baud rate",
+      "Pipeline forwarding eliminates unnecessary stalls during consecutive ALU data dependencies",
+    ],
+    estimatedHours: 24,
+    domainContext: "FPGA Systems & Hardware Acceleration",
+    ecosystem: "hardware_hdl",
+  },
+  {
+    id: "proj_vlsi_asic_tapeout",
+    title: "Tapeout-Ready ASIC Layout with OpenROAD & UVM Verification Suite",
+    description:
+      "Drive an RTL design through the complete OpenROAD ASIC physical design flow (Synthesis, Floorplanning, Placement, CTS, Routing, DRC/LVS) targeting the SkyWater 130nm PDK, alongside a comprehensive UVM verification testbench.",
+    targetSkillIds: ["static_timing_analysis_sta", "asic_physical_design_flow", "uvm_verification_methodology"],
+    deliverables: [
+      "Clean GDSII layout generated with OpenROAD/OpenLane targeting SkyWater 130nm open PDK",
+      "DRC (Design Rule Checking) and LVS (Layout Versus Schematic) reports showing 0 errors",
+      "Complete UVM testbench with driver, monitor, scoreboard, and functional coverage model achieving >95% coverage",
+      "Power, Performance, and Area (PPA) report across typical, slow, and fast PVT corners",
+    ],
+    verificationChecklist: [
+      "Magic / KLayout DRC report confirms zero design rule violations",
+      "Netgen LVS report confirms clean schematic match",
+      "UVM testbench completes 10,000 randomized transactions with zero scoreboard mismatches",
+    ],
+    estimatedHours: 28,
+    domainContext: "ASIC Physical Design & Tapeout",
+    ecosystem: "hardware_hdl",
+  },
   // DevOps & Cloud Platform Infrastructure
   {
     id: "proj_devops_ci_cd_pipeline",
@@ -1235,6 +1823,7 @@ export const SEEDED_PROJECTS: PracticalProject[] = [
     ],
     estimatedHours: 18,
     domainContext: "Cloud Infrastructure & Platform Engineering",
+    ecosystem: "agnostic",
   },
   {
     id: "proj_devops_infra_hardening",
@@ -1253,6 +1842,7 @@ export const SEEDED_PROJECTS: PracticalProject[] = [
     ],
     estimatedHours: 20,
     domainContext: "DevOps & Cloud Security",
+    ecosystem: "agnostic",
   },
 
   // Full-Stack Web & Applications
@@ -1274,6 +1864,7 @@ export const SEEDED_PROJECTS: PracticalProject[] = [
     ],
     estimatedHours: 20,
     domainContext: "Full-Stack Web Software",
+    ecosystem: "typescript_node",
   },
 
   // Systems & Modern C++
@@ -1294,6 +1885,7 @@ export const SEEDED_PROJECTS: PracticalProject[] = [
     ],
     estimatedHours: 22,
     domainContext: "Systems & Low-Latency Architecture",
+    ecosystem: "cpp",
   },
 
   // Java & Enterprise ERP
@@ -1316,6 +1908,7 @@ export const SEEDED_PROJECTS: PracticalProject[] = [
     ],
     estimatedHours: 16,
     domainContext: "Enterprise ERP / Logistics",
+    ecosystem: "java_spring",
   },
   {
     id: "proj_java_erp_workflow",
@@ -1336,6 +1929,7 @@ export const SEEDED_PROJECTS: PracticalProject[] = [
     ],
     estimatedHours: 24,
     domainContext: "Enterprise ERP & Financial Auditing",
+    ecosystem: "java_spring",
   },
 
   // Node.js & TypeScript
@@ -1357,6 +1951,7 @@ export const SEEDED_PROJECTS: PracticalProject[] = [
     ],
     estimatedHours: 16,
     domainContext: "Modern SaaS Product",
+    ecosystem: "typescript_node",
   },
 
   // Python & FastAPI
@@ -1378,6 +1973,7 @@ export const SEEDED_PROJECTS: PracticalProject[] = [
     ],
     estimatedHours: 14,
     domainContext: "Cloud Data Services",
+    ecosystem: "python_fastapi",
   },
 
   // Defensive Cybersecurity
@@ -1398,6 +1994,7 @@ export const SEEDED_PROJECTS: PracticalProject[] = [
     ],
     estimatedHours: 14,
     domainContext: "Defensive Security Engineering",
+    ecosystem: "agnostic",
   },
   {
     id: "proj_cyber_lab_audit",
@@ -1418,6 +2015,7 @@ export const SEEDED_PROJECTS: PracticalProject[] = [
     ],
     estimatedHours: 18,
     domainContext: "Defensive Security Engineering",
+    ecosystem: "agnostic",
   },
   {
     id: "proj_cyber_ctf_defense",
@@ -1443,5 +2041,6 @@ export const SEEDED_PROJECTS: PracticalProject[] = [
     ],
     estimatedHours: 22,
     domainContext: "Defensive Security Engineering",
+    ecosystem: "agnostic",
   },
 ];

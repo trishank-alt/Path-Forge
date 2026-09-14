@@ -36,9 +36,8 @@ export function DiagnosticQuizModal({
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  if (!isOpen || !skillId) return null;
-
-  const skill = SEEDED_SKILLS.find((s) => s.id === skillId) || SEEDED_SKILLS[0];
+  const skill = SEEDED_SKILLS.find((s) => s.id === skillId);
+  if (!isOpen || !skillId || !skill) return null;
 
   // Dynamic tailored 3 diagnostic questions per skill
   const getQuestions = (): Question[] => {

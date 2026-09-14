@@ -4,14 +4,27 @@ import {
   Milestone,
   MilestoneStatus,
   Roadmap,
+  TechnologyEcosystem,
 } from "../../contracts";
 import {
   SEEDED_PROJECTS,
   SEEDED_RESOURCES,
   PathDefinition,
 } from "../../persistence/seed-data";
+import { Curriculum, catalogPathToCurriculum } from "./curriculum-model";
 import { RecommendationScorer } from "./recommendation-scorer";
 import { SkillGapAnalysisResult } from "./skill-gap-service";
+import { isProjectCompatible } from "./technology-ecosystem";
+
+function toCurriculum(
+  target: Curriculum | PathDefinition,
+  ecosystem: TechnologyEcosystem = "agnostic"
+): Curriculum {
+  if ("source" in target && (target.source === "catalog" || target.source === "constructed")) {
+    return target;
+  }
+  return catalogPathToCurriculum(target as PathDefinition, ecosystem);
+}
 
 export class MilestonePlanner {
   private scorer: RecommendationScorer;
@@ -24,10 +37,14 @@ export class MilestonePlanner {
    * Returns path-tailored phase metadata for each milestone phase.
    */
   private getPhaseDetails(
-    pathDef: PathDefinition,
-    phaseNumber: number
+    target: Curriculum | PathDefinition,
+    phaseNumber: number,
+    ecosystem: TechnologyEcosystem = "agnostic"
   ): { title: string; desc: string } {
-    if (pathDef.id === "devops_cloud_engineer") {
+    const curriculum = toCurriculum(target, ecosystem);
+    const rawId = curriculum.source === "catalog" ? curriculum.id.replace("catalog:", "") : "";
+
+    if (rawId === "devops_cloud_engineer") {
       if (phaseNumber === 1) {
         return {
           title: "Phase 1: Linux Networking & Container Infrastructure",
@@ -46,7 +63,46 @@ export class MilestonePlanner {
       }
     }
 
-    if (pathDef.id === "fullstack_software_engineer") {
+    if (rawId === "fullstack_software_engineer") {
+      if (ecosystem === "java_spring") {
+        if (phaseNumber === 1) {
+          return {
+            title: "Phase 1: Modern Web Frontend & Core Java Foundations",
+            desc: "Master responsive HTML5/CSS layouts and Java OOP fundamentals.",
+          };
+        } else if (phaseNumber === 2) {
+          return {
+            title: "Phase 2: Spring Boot REST APIs & JPA Persistence",
+            desc: "Build robust REST APIs with Spring Data JPA and relational database persistence.",
+          };
+        } else {
+          return {
+            title: "Phase 3: End-to-End Full-Stack Integration & Deployment",
+            desc: "Connect web client to Spring Boot services with JWT auth, Docker, and full-stack integration tests.",
+          };
+        }
+      }
+
+      if (ecosystem === "python_fastapi") {
+        if (phaseNumber === 1) {
+          return {
+            title: "Phase 1: Modern Web Frontend & Python Foundations",
+            desc: "Master responsive HTML5/CSS layouts and Python async fundamentals.",
+          };
+        } else if (phaseNumber === 2) {
+          return {
+            title: "Phase 2: FastAPI Microservices & SQLAlchemy Persistence",
+            desc: "Build asynchronous REST APIs with Pydantic validation and SQLAlchemy relational models.",
+          };
+        } else {
+          return {
+            title: "Phase 3: End-to-End Full-Stack Integration & Cloud Deployment",
+            desc: "Connect web client to FastAPI services with JWT auth, Docker, and full-stack integration tests.",
+          };
+        }
+      }
+
+      // Default fullstack (TypeScript / Node or agnostic)
       if (phaseNumber === 1) {
         return {
           title: "Phase 1: Modern Web Frontend & TypeScript Foundations",
@@ -65,7 +121,7 @@ export class MilestonePlanner {
       }
     }
 
-    if (pathDef.id === "systems_cpp_engineer") {
+    if (rawId === "systems_cpp_engineer") {
       if (phaseNumber === 1) {
         return {
           title: "Phase 1: Modern C++ & Memory Safety Foundations",
@@ -84,7 +140,7 @@ export class MilestonePlanner {
       }
     }
 
-    if (pathDef.id === "cybersecurity_defensive_redteam") {
+    if (rawId === "cybersecurity_defensive_redteam") {
       if (phaseNumber === 1) {
         return {
           title: "Phase 1: Ethical Security Scope, Linux & Network Inspection",
@@ -103,7 +159,7 @@ export class MilestonePlanner {
       }
     }
 
-    if (pathDef.id === "backend_web_product_node") {
+    if (rawId === "backend_web_product_node") {
       if (phaseNumber === 1) {
         return {
           title: "Phase 1: TypeScript & Asynchronous Node.js Foundations",
@@ -122,7 +178,7 @@ export class MilestonePlanner {
       }
     }
 
-    if (pathDef.id === "backend_python_cloud") {
+    if (rawId === "backend_python_cloud") {
       if (phaseNumber === 1) {
         return {
           title: "Phase 1: Python Foundations & AsyncIO Concurrency Architecture",
@@ -141,46 +197,117 @@ export class MilestonePlanner {
       }
     }
 
-    // Default: backend_enterprise_java
+    if (rawId === "backend_enterprise_java") {
+      if (phaseNumber === 1) {
+        return {
+          title: "Phase 1: Core Java Runtime & Relational Modeling Foundations",
+          desc: "Master JVM memory mechanics, OOP design patterns, and 3NF SQL database modeling.",
+        };
+      } else if (phaseNumber === 2) {
+        return {
+          title: "Phase 2: Spring Boot Microservices & JPA Persistence Architecture",
+          desc: "Build production-grade REST APIs with Spring Data JPA and automated Testcontainers suites.",
+        };
+      } else {
+        return {
+          title: "Phase 3: Enterprise Security, Distributed Caching & ERP State Machines",
+          desc: "Implement OAuth2 role authorization, transactional workflows, and immutable audit logs.",
+        };
+      }
+    }
+
+    // Generic fallback for any other path
+    // Generic fallback for any other path or constructed curriculum
     if (phaseNumber === 1) {
       return {
-        title: "Phase 1: Core Java Runtime & Relational Modeling Foundations",
-        desc: "Master JVM memory mechanics, OOP design patterns, and 3NF SQL database modeling.",
+        title: `Phase 1: Core Fundamentals & Foundations for ${curriculum.title}`,
+        desc: `Establish strong foundational competencies and core principles for ${curriculum.title}.`,
       };
     } else if (phaseNumber === 2) {
       return {
-        title: "Phase 2: Spring Boot Microservices & JPA Persistence Architecture",
-        desc: "Build production-grade REST APIs with Spring Data JPA and automated Testcontainers suites.",
+        title: `Phase 2: Architecture, Persistence & System Integration`,
+        desc: `Design and implement core service layers, data persistence, and automated test suites.`,
       };
     } else {
       return {
-        title: "Phase 3: Enterprise Security, Distributed Caching & ERP State Machines",
-        desc: "Implement OAuth2 role authorization, transactional workflows, and immutable audit logs.",
+        title: `Phase 3: Production Deployment, Security & Advanced Systems`,
+        desc: `Deploy hardened, production-ready workflows with comprehensive testing and monitoring.`,
       };
     }
+  }
+
+  /**
+   * Deterministically computes the total required hours for a target path or curriculum and its skill gaps
+   * without constructing or persisting a full Roadmap.
+   */
+  public calculateRequiredHours(
+    target: Curriculum | PathDefinition,
+    gapResults: SkillGapAnalysisResult[],
+    targetEcosystem?: TechnologyEcosystem
+  ): number {
+    const ecosystem = targetEcosystem || (target as any).technologyEcosystem || "agnostic";
+    const curriculum = toCurriculum(target, ecosystem);
+    const activeGaps = gapResults.filter((g) => g.gap > 0 || g.status === "claimed_unverified");
+
+    const rawId = curriculum.source === "catalog" ? curriculum.id.replace("catalog:", "") : "";
+    const phase1Gaps = activeGaps.filter((g) => g.skill.level <= 2);
+    const phase2Gaps = activeGaps.filter(
+      (g) =>
+        g.skill.level === 3 &&
+        (g.skill.domain === "databases" ||
+          g.skill.domain.includes("ecosystem") ||
+          g.skill.domain === "networking" ||
+          g.skill.domain === "devops" ||
+          g.skill.domain === "quality" ||
+          (rawId === "cybersecurity_defensive_redteam" &&
+            (g.skillId === "threat_modeling_owasp" ||
+              g.skillId === "secure_code_review" ||
+              g.skillId === "web_security_mechanisms")))
+    );
+    const phase3Gaps = activeGaps.filter((g) => !phase1Gaps.includes(g) && !phase2Gaps.includes(g));
+
+    const milestoneGroups: { gaps: SkillGapAnalysisResult[] }[] = [];
+    if (phase1Gaps.length > 0) milestoneGroups.push({ gaps: phase1Gaps });
+    if (phase2Gaps.length > 0) milestoneGroups.push({ gaps: phase2Gaps });
+    if (phase3Gaps.length > 0) milestoneGroups.push({ gaps: phase3Gaps });
+
+    if (milestoneGroups.length === 0 && activeGaps.length > 0) {
+      milestoneGroups.push({ gaps: activeGaps });
+    }
+
+    let cumulativeHours = 0;
+    for (const group of milestoneGroups) {
+      cumulativeHours += Math.max(10, group.gaps.length * 10);
+    }
+
+    return cumulativeHours || 60; // Minimum default path workload if active gaps are 0
   }
 
   /**
    * Plans a dependency-safe sequence of milestones with effort estimates, resources, and practical projects.
    */
   public planMilestones(
-    pathDef: PathDefinition,
+    target: Curriculum | PathDefinition,
     gapResults: SkillGapAnalysisResult[],
     preferences: LearnerPreferences,
     constraints: LearnerConstraints,
-    profileId: string
+    profileId: string,
+    targetEcosystem?: TechnologyEcosystem
   ): Roadmap {
+    const ecosystem = targetEcosystem || (target as any).technologyEcosystem || "agnostic";
+    const curriculum = toCurriculum(target, ecosystem);
     const weeklyHours = constraints.hoursPerWeek || 8;
     const activeGaps = gapResults.filter((g) => g.gap > 0 || g.status === "claimed_unverified");
+
+    const rawId = curriculum.source === "catalog" ? curriculum.id.replace("catalog:", "") : "";
 
     // Group gaps into 3-4 logical milestone phases
     const milestoneGroups: { title: string; desc: string; gaps: SkillGapAnalysisResult[] }[] = [];
 
     // Phase 1: Core Foundations & Framework Fundamentals (level 1-2)
-    // Phase 1: Core Foundations & Framework Fundamentals (level 1-2)
     const phase1Gaps = activeGaps.filter((g) => g.skill.level <= 2);
     if (phase1Gaps.length > 0) {
-      const meta = this.getPhaseDetails(pathDef, 1);
+      const meta = this.getPhaseDetails(curriculum, 1, ecosystem);
       milestoneGroups.push({
         title: meta.title,
         desc: meta.desc,
@@ -192,18 +319,19 @@ export class MilestonePlanner {
     const phase2Gaps = activeGaps.filter(
       (g) =>
         g.skill.level === 3 &&
-        (g.skill.domain === "databases" ||
+        (curriculum.source === "constructed" ||
+          g.skill.domain === "databases" ||
           g.skill.domain.includes("ecosystem") ||
           g.skill.domain === "networking" ||
           g.skill.domain === "devops" ||
           g.skill.domain === "quality" ||
-          (pathDef.id === "cybersecurity_defensive_redteam" &&
+          (rawId === "cybersecurity_defensive_redteam" &&
             (g.skillId === "threat_modeling_owasp" ||
               g.skillId === "secure_code_review" ||
               g.skillId === "web_security_mechanisms")))
     );
     if (phase2Gaps.length > 0) {
-      const meta = this.getPhaseDetails(pathDef, 2);
+      const meta = this.getPhaseDetails(curriculum, 2, ecosystem);
       milestoneGroups.push({
         title: meta.title,
         desc: meta.desc,
@@ -214,7 +342,7 @@ export class MilestonePlanner {
     // Phase 3: Security, Enterprise Workflows & Hardening (level 3-4 advanced/specialized)
     const phase3Gaps = activeGaps.filter((g) => !phase1Gaps.includes(g) && !phase2Gaps.includes(g));
     if (phase3Gaps.length > 0) {
-      const meta = this.getPhaseDetails(pathDef, 3);
+      const meta = this.getPhaseDetails(curriculum, 3, ecosystem);
       milestoneGroups.push({
         title: meta.title,
         desc: meta.desc,
@@ -224,13 +352,17 @@ export class MilestonePlanner {
 
     // If grouping was empty, create at least one milestone from active gaps
     if (milestoneGroups.length === 0 && activeGaps.length > 0) {
-      const meta = this.getPhaseDetails(pathDef, 1);
+      const meta = this.getPhaseDetails(curriculum, 1, ecosystem);
       milestoneGroups.push({
         title: meta.title,
         desc: meta.desc,
         gaps: activeGaps,
       });
     }
+
+    // Resources & Projects pool
+    const resourcePool = curriculum.source === "constructed" ? curriculum.resources : SEEDED_RESOURCES;
+    const projectPool = curriculum.source === "constructed" ? curriculum.projects : SEEDED_PROJECTS;
 
     // Build Milestones
     let currentOrder = 1;
@@ -246,61 +378,60 @@ export class MilestonePlanner {
       cumulativeHours += groupHours;
       const groupWeeks = Number((groupHours / weeklyHours).toFixed(1));
 
-      // Gather & rank resources
-      let matchedResources = SEEDED_RESOURCES.filter((r) => groupSkillIds.includes(r.skillId));
-      if (matchedResources.length === 0) {
-        // Fallback: match by path title/domain
-        matchedResources = SEEDED_RESOURCES.filter(
+      // Gather & rank resources with ecosystem compatibility
+      let matchedResources = resourcePool.filter((r) => groupSkillIds.includes(r.skillId));
+      if (matchedResources.length === 0 && curriculum.source === "catalog") {
+        matchedResources = resourcePool.filter(
           (r) =>
             (r.languageOrDomainMatch &&
-              pathDef.title.toLowerCase().includes(r.languageOrDomainMatch.toLowerCase())) ||
-            (r.description && pathDef.domain.toLowerCase().includes(r.description.toLowerCase()))
+              curriculum.title.toLowerCase().includes(r.languageOrDomainMatch.toLowerCase())) ||
+            (r.description && curriculum.domain.toLowerCase().includes(r.description.toLowerCase()))
         );
       }
       if (matchedResources.length === 0) {
-        matchedResources = SEEDED_RESOURCES.filter((r) => groupSkillIds.includes(r.skillId));
+        matchedResources = resourcePool.filter((r) => groupSkillIds.includes(r.skillId));
       }
 
       const scoredResources = this.scorer.scoreAndRankResources(
         matchedResources,
-        groupSkillIds[0] || pathDef.id,
-        preferences
+        groupSkillIds[0] || curriculum.id,
+        preferences,
+        2,
+        ecosystem
       );
 
-      // Match practical project: Priority 1 - same domain & matching skill IDs
-      let matchedProject = SEEDED_PROJECTS.find(
+      // Match practical project
+      const candidateProjects = projectPool.filter((p) =>
+        isProjectCompatible(p.ecosystem, ecosystem)
+      );
+
+      let matchedProject = candidateProjects.find(
         (p) =>
-          (p.domainContext.toLowerCase().includes(pathDef.domain.toLowerCase()) ||
-            pathDef.domain.toLowerCase().includes(p.domainContext.toLowerCase()) ||
-            pathDef.title.toLowerCase().includes(p.domainContext.toLowerCase()) ||
-            p.domainContext.toLowerCase().includes(pathDef.title.toLowerCase())) &&
+          (p.domainContext.toLowerCase().includes(curriculum.domain.toLowerCase()) ||
+            curriculum.domain.toLowerCase().includes(p.domainContext.toLowerCase()) ||
+            curriculum.title.toLowerCase().includes(p.domainContext.toLowerCase()) ||
+            p.domainContext.toLowerCase().includes(curriculum.title.toLowerCase())) &&
           p.targetSkillIds.some((s) => groupSkillIds.includes(s))
       );
 
       if (!matchedProject) {
-        // Priority 2: Exact skill match across all projects
-        matchedProject = SEEDED_PROJECTS.find((p) =>
+        matchedProject = candidateProjects.find((p) =>
           p.targetSkillIds.some((s) => groupSkillIds.includes(s))
         );
       }
 
-      if (!matchedProject) {
-        // Priority 3: Match by domainContext or path title
-        matchedProject = SEEDED_PROJECTS.find(
+      if (!matchedProject && candidateProjects.length > 0) {
+        matchedProject = candidateProjects.find(
           (p) =>
-            p.domainContext.toLowerCase().includes(pathDef.domain.toLowerCase()) ||
-            pathDef.title.toLowerCase().includes(p.domainContext.toLowerCase())
+            p.domainContext.toLowerCase().includes(curriculum.domain.toLowerCase()) ||
+            curriculum.title.toLowerCase().includes(p.domainContext.toLowerCase())
         );
-      }
-
-      if (!matchedProject) {
-        matchedProject = SEEDED_PROJECTS[0];
       }
 
       const status: MilestoneStatus = currentOrder === 1 ? "in_progress" : "locked";
 
       milestones.push({
-        id: `ms_${pathDef.id}_${currentOrder}`,
+        id: `ms_${curriculum.id.replace(/[^a-zA-Z0-9_]/g, "_")}_${currentOrder}`,
         order: currentOrder,
         title: group.title,
         description: group.desc,
@@ -325,13 +456,16 @@ export class MilestonePlanner {
     }
 
     const totalWeeks = Number((cumulativeHours / weeklyHours).toFixed(1));
+    const targetPathId = curriculum.source === "catalog" ? curriculum.id.replace("catalog:", "") : null;
 
     return {
-      id: `roadmap_${pathDef.id}_${Date.now()}`,
+      id: `roadmap_${curriculum.source}_${Date.now()}`,
       version: 1,
       profileId,
-      targetPathId: pathDef.id,
-      targetPathTitle: pathDef.title,
+      targetPathId,
+      targetPathTitle: curriculum.title,
+      curriculumId: curriculum.id,
+      curriculumSource: curriculum.source,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       isStale: false,
@@ -340,7 +474,7 @@ export class MilestonePlanner {
       weeklyPaceHours: weeklyHours,
       milestones,
       nextBestAction: null, // Computed by NBA service
-      assumptions: pathDef.defaultAssumptions,
+      assumptions: curriculum.defaultAssumptions,
       warnings:
         constraints.hoursPerWeek < 5
           ? ["Low weekly time budget (<5h/week) will substantially extend roadmap completion time."]
@@ -348,3 +482,4 @@ export class MilestonePlanner {
     };
   }
 }
+

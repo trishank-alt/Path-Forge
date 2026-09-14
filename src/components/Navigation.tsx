@@ -70,13 +70,27 @@ export function Navigation({
   const statusBadge = getStatusBadge();
   const StatusIcon = statusBadge.icon;
 
+  const activeFactsCount = profile?.facts.filter((f) => f.status === "active").length || 0;
+  const hasDistinctHypothesis =
+    activeFactsCount > 0 &&
+    Boolean(profile?.intent.topPathId) &&
+    Boolean(
+      profile?.intent.hypotheses.some(
+        (h) => h.posteriorProbability > 1 / (profile.intent.hypotheses.length || 1) + 0.05
+      )
+    );
+
+  const tentativeHypothesis = profile?.intent.topPathId
+    ? profile.intent.hypotheses.find((h) => h.pathId === profile.intent.topPathId)
+    : null;
+
   const displayRole =
     status === "ready"
       ? profile?.declaredTargetRole || "Committed Path"
       : status === "provisional"
       ? profile?.declaredTargetRole || "Provisional Path"
-      : profile?.intent.hypotheses[0]?.pathTitle
-      ? `Tentative: ${profile.intent.hypotheses[0].pathTitle}`
+      : hasDistinctHypothesis && tentativeHypothesis?.pathTitle
+      ? `Tentative: ${tentativeHypothesis.pathTitle}`
       : "Discovering Intent...";
 
   return (
@@ -177,7 +191,7 @@ export function Navigation({
           <button
             onClick={onOpenSettings}
             className="p-2 text-xs font-medium rounded-xl glass-card hover:border-slate-500 text-slate-300 hover:text-white transition-colors"
-            title="LLM Settings (Gemini / OpenAI API Keys)"
+            title="LLM Settings (Gemini / Groq / OpenAI API Keys)"
           >
             <Settings2 className="w-4 h-4" />
           </button>

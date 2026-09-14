@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { Navigation } from "@/components/Navigation";
-import { IntakeChat } from "@/components/IntakeChat";
+import { IntakeChat, ChatMessageItem } from "@/components/IntakeChat";
 import { NextBestActionCard } from "@/components/NextBestActionCard";
 import { RoadmapTimeline } from "@/components/RoadmapTimeline";
 import { SkillMatrix } from "@/components/SkillMatrix";
@@ -32,6 +32,11 @@ export default function Home() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [activeQuestion, setActiveQuestion] = useState<QuestionDecision | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessageItem[]>([]);
+  const [lastAction, setLastAction] = useState<{
+    type: "message" | "answer";
+    payload: any;
+  } | null>(null);
 
   const [activeTab, setActiveTab] = useState<"roadmap" | "skills" | "scenarios">("roadmap");
 
@@ -45,6 +50,18 @@ export default function Home() {
     "Content-Type": "application/json",
     "x-learner-id": currentId,
   });
+
+  const getLlmSettings = () => {
+    const provider = sessionStorage.getItem("pathfinder_provider") as "gemini" | "openai" | "deterministic" | "groq" | null;
+    const apiKey = sessionStorage.getItem("pathfinder_api_key") || undefined;
+    const modelName = sessionStorage.getItem("pathfinder_model") || undefined;
+    return { provider: provider || undefined, apiKey, modelName };
+  };
+
+  const getFormattedTime = () => {
+    const d = new Date();
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  };
 
   // Load profile and roadmap on initial mount or when learnerId changes
   const loadInitialData = async (targetLearnerId: string = learnerId) => {
@@ -96,18 +113,26 @@ export default function Home() {
     loadInitialData(learnerId);
   }, [learnerId]);
 
-  const getLlmSettings = () => {
-    const provider = sessionStorage.getItem("pathfinder_provider") as "gemini" | "openai" | "deterministic" | null;
-    const apiKey = sessionStorage.getItem("pathfinder_api_key") || undefined;
-    const modelName = sessionStorage.getItem("pathfinder_model") || undefined;
-    return { provider: provider || undefined, apiKey, modelName };
-  };
-
   // 1. Send Message
-  const handleSendMessage = async (message: string) => {
+  const handleSendMessage = async (message: string, forceProvider?: "gemini" | "openai" | "deterministic" | "groq") => {
     setIsLoading(true);
+    setLastAction({ type: "message", payload: { message } });
+
+    // Append user message immediately
+    const userMsg: ChatMessageItem = {
+      id: `user_${Date.now()}`,
+      sender: "user",
+      text: message,
+      timestamp: getFormattedTime(),
+    };
+    setChatMessages((prev) => [...prev, userMsg]);
+
     try {
-      const { provider, apiKey, modelName } = getLlmSettings();
+      const llmSettings = getLlmSettings();
+      const provider = forceProvider || llmSettings.provider;
+      const apiKey = forceProvider === "deterministic" ? undefined : llmSettings.apiKey;
+      const modelName = forceProvider === "deterministic" ? "rule-engine-v1" : llmSettings.modelName;
+
       const res = await fetch("/api/v1/intake/messages", {
         method: "POST",
         headers: getHeaders(),
@@ -119,37 +144,102 @@ export default function Home() {
         }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        setProfile(data.profile);
-        setActiveQuestion(data.activeQuestion);
-        if (data.roadmap) {
-          setRoadmap(data.roadmap);
-          setSavedRoadmaps((prev) => {
-            const exists = prev.some((r) => r.id === data.roadmap.id);
-            return exists ? prev : [data.roadmap, ...prev];
-          });
-        } else {
-          setRoadmap(null);
-        }
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || `API request failed with HTTP ${res.status}`);
       }
-    } catch (err) {
+
+      const data = await res.json();
+      setProfile(data.profile);
+      setActiveQuestion(data.activeQuestion);
+
+      if (data.roadmap) {
+        setRoadmap(data.roadmap);
+        setSavedRoadmaps((prev) => {
+          const exists = prev.some((r) => r.id === data.roadmap.id);
+          return exists ? prev : [data.roadmap, ...prev];
+        });
+      } else {
+        setRoadmap(null);
+      }
+
+      // Assistant response text
+      let replyText = "I've analyzed your input and updated your profile attributes.";
+      if (data.activeQuestion?.selectedQuestion?.dimension === "confirm_goal_change") {
+        replyText = "It looks like you may be switching your target career. Please confirm below so I can align your curriculum recommendations:";
+      } else if (data.roadmap) {
+        replyText = `Target identified: ${data.profile?.declaredTargetRole || "Verified Track"}. Generated your customized learning milestones.`;
+      } else if (data.decision?.recommendation) {
+        replyText = `Not sure which direction to take? Here are the supported options for ${data.profile?.declaredTargetRole || "your track"}, highlighted by industry demand:`;
+      } else if (data.decision?.eligibility === "unsupported_intent") {
+        replyText = data.decision?.explanation || "PathFinder cannot currently establish a verified curriculum for this goal.";
+      } else if (data.decision?.eligibility === "infeasible") {
+        replyText = data.decision?.explanation || "Your target roadmap requires more time than your current pace allows.";
+      } else if (data.activeQuestion) {
+        replyText = `Extracted technical dimensions from your goal. Let's clarify a few details to tailor your curriculum:`;
+      } else if (data.extractedFacts && data.extractedFacts.length > 0) {
+        replyText = `Extracted ${data.extractedFacts.length} technical dimensions from your goal.`;
+      }
+
+      const assistantMsg: ChatMessageItem = {
+        id: `asst_${Date.now()}`,
+        sender: "assistant",
+        text: replyText,
+        timestamp: getFormattedTime(),
+        facts: data.extractedFacts,
+        question: data.activeQuestion,
+        decision: data.decision,
+        feasibility: data.feasibility,
+        executionMetadata: data.executionMetadata,
+        status: data.profile?.intent?.status,
+      };
+
+      setChatMessages((prev) => [...prev, assistantMsg]);
+    } catch (err: any) {
       console.error("Error sending message:", err);
+      const errorMsg: ChatMessageItem = {
+        id: `err_${Date.now()}`,
+        sender: "error",
+        text: "Failed to generate response from AI provider.",
+        timestamp: getFormattedTime(),
+        errorMessage: err.message || "An error occurred while connecting to the AI model provider.",
+        errorProvider: forceProvider || getLlmSettings().provider || "groq",
+      };
+      setChatMessages((prev) => [...prev, errorMsg]);
     } finally {
       setIsLoading(false);
     }
   };
 
   // 2. Answer Question
-  const handleAnswerQuestion = async (dimension: string, answer: string | string[]) => {
+  const handleAnswerQuestion = async (
+    dimension: string,
+    answer: string | string[],
+    forceProvider?: "gemini" | "openai" | "deterministic" | "groq"
+  ) => {
     setIsLoading(true);
+    setLastAction({ type: "answer", payload: { dimension, answer } });
+
+    // Append user answer bubble
+    const userMsg: ChatMessageItem = {
+      id: `user_ans_${Date.now()}`,
+      sender: "user",
+      text: Array.isArray(answer) ? answer.join(", ") : String(answer),
+      timestamp: getFormattedTime(),
+    };
+    setChatMessages((prev) => [...prev, userMsg]);
+
     try {
-      const { provider, apiKey, modelName } = getLlmSettings();
+      const llmSettings = getLlmSettings();
+      const provider = forceProvider || llmSettings.provider;
+      const apiKey = forceProvider === "deterministic" ? undefined : llmSettings.apiKey;
+      const modelName = forceProvider === "deterministic" ? "rule-engine-v1" : llmSettings.modelName;
+
       const res = await fetch("/api/v1/profiles/me/answers", {
         method: "POST",
         headers: getHeaders(),
         body: JSON.stringify({
-          questionId: activeQuestion?.selectedQuestion.id || "q_answer",
+          questionId: activeQuestion?.selectedQuestion?.id || `q_${Date.now()}`,
           dimension,
           answer,
           modelProvider: provider,
@@ -158,34 +248,99 @@ export default function Home() {
         }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        setProfile(data.profile);
-        setActiveQuestion(data.activeQuestion);
-        if (data.roadmap) {
-          setRoadmap(data.roadmap);
-          setSavedRoadmaps((prev) => {
-            const exists = prev.some((r) => r.id === data.roadmap.id);
-            return exists ? prev : [data.roadmap, ...prev];
-          });
-        } else {
-          setRoadmap(null);
-        }
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || `API request failed with HTTP ${res.status}`);
       }
-    } catch (err) {
+
+      const data = await res.json();
+      setProfile(data.profile);
+      setActiveQuestion(data.activeQuestion);
+
+      if (data.roadmap) {
+        setRoadmap(data.roadmap);
+        setSavedRoadmaps((prev) => {
+          const exists = prev.some((r) => r.id === data.roadmap.id);
+          return exists ? prev : [data.roadmap, ...prev];
+        });
+      } else {
+        setRoadmap(null);
+      }
+
+      let replyText = `Captured preference for ${dimension.replace(/_/g, " ")}.`;
+      if (data.roadmap) {
+        replyText = "Target path verified! Your customized learning roadmap is ready below.";
+      } else if (data.decision?.recommendation) {
+        replyText = `Here are the supported directions for your path, highlighted by market demand:`;
+      } else if (data.decision?.eligibility === "unsupported_intent") {
+        replyText = data.decision?.explanation || "PathFinder cannot currently establish a verified curriculum for this goal.";
+      } else if (data.decision?.eligibility === "infeasible") {
+        replyText = data.decision?.explanation || "Your target roadmap requires more time than your current pace allows.";
+      } else if (data.activeQuestion) {
+        replyText = "Got it! Here is the next question to finalize your curriculum:";
+      }
+
+      const assistantMsg: ChatMessageItem = {
+        id: `asst_ans_${Date.now()}`,
+        sender: "assistant",
+        text: replyText,
+        timestamp: getFormattedTime(),
+        facts: data.extractedFacts,
+        question: data.activeQuestion,
+        decision: data.decision,
+        feasibility: data.feasibility,
+        executionMetadata: data.executionMetadata,
+        status: data.profile?.intent?.status,
+      };
+
+      setChatMessages((prev) => [...prev, assistantMsg]);
+    } catch (err: any) {
       console.error("Error answering question:", err);
+      const errorMsg: ChatMessageItem = {
+        id: `err_${Date.now()}`,
+        sender: "error",
+        text: "Failed to process question answer with AI provider.",
+        timestamp: getFormattedTime(),
+        errorMessage: err.message || "An error occurred while connecting to the AI model provider.",
+        errorProvider: forceProvider || getLlmSettings().provider || "groq",
+      };
+      setChatMessages((prev) => [...prev, errorMsg]);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // 3. Preset Quick Loader
+  // 3. Switch to Deterministic Engine Fallback
+  const handleSwitchToDeterministic = async () => {
+    sessionStorage.setItem("pathfinder_provider", "deterministic");
+    sessionStorage.setItem("pathfinder_model", "rule-engine-v1");
+
+    // Re-run last failed action with deterministic provider
+    if (lastAction?.type === "message") {
+      await handleSendMessage(lastAction.payload.message, "deterministic");
+    } else if (lastAction?.type === "answer") {
+      await handleAnswerQuestion(lastAction.payload.dimension, lastAction.payload.answer, "deterministic");
+    } else {
+      await handleSendMessage("I want to become a backend engineer", "deterministic");
+    }
+  };
+
+  // 4. Retry Last Action
+  const handleRetryLastAction = async () => {
+    if (lastAction?.type === "message") {
+      await handleSendMessage(lastAction.payload.message);
+    } else if (lastAction?.type === "answer") {
+      await handleAnswerQuestion(lastAction.payload.dimension, lastAction.payload.answer);
+    }
+  };
+
+  // 5. Preset Quick Loader
   const handleSelectPreset = async (preset: { title: string; initialMessage: string }) => {
     await handleReset();
     await handleSendMessage(preset.initialMessage);
   };
 
-  // 4. Reset Session (Start Fresh with Roadmap Archiving)
+  // 6. Reset Session (Start Fresh with Roadmap Archiving)
   const handleReset = async () => {
     setIsLoading(true);
     try {
@@ -199,6 +354,8 @@ export default function Home() {
         setRoadmap(null);
         setActiveQuestion(null);
         setScenarios([]);
+        setChatMessages([]);
+        setLastAction(null);
 
         // Reload history so the archived roadmap appears in Saved Roadmaps
         const histRes = await fetch("/api/v1/profiles/me/roadmaps/history", {
@@ -307,8 +464,11 @@ export default function Home() {
   };
 
   const handleAdoptScenario = (scenario: Scenario) => {
-    setRoadmap(scenario.computedRoadmap);
-    setActiveTab("roadmap");
+    const targetRoadmap = scenario.computedRoadmap || scenario.resultRoadmap || null;
+    if (targetRoadmap) {
+      setRoadmap(targetRoadmap);
+      setActiveTab("roadmap");
+    }
   };
 
   // 7. Submit Diagnostic Quiz
@@ -404,16 +564,19 @@ export default function Home() {
         )}
 
         <div className="grid grid-cols-1 gap-6">
-          <div className="h-[480px]">
+          <div className="h-[520px]">
             <IntakeChat
               profile={profile}
               activeQuestion={activeQuestion}
+              messages={chatMessages}
               onSendMessage={handleSendMessage}
               onAnswerQuestion={handleAnswerQuestion}
               isLoading={isLoading}
+              onOpenSettings={() => setIsSettingsOpen(true)}
+              onSwitchToDeterministic={handleSwitchToDeterministic}
+              onRetryLastAction={handleRetryLastAction}
             />
           </div>
-
         </div>
 
         {/* Tabbed View Section: Roadmap vs Skills vs Scenarios */}

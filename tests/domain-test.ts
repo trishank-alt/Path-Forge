@@ -58,7 +58,7 @@ async function runVerification() {
     questionCount: 0,
   });
 
-  console.log(`- Top Path: ${hyp1.topPath.pathTitle}`);
+  console.log(`- Top Path: ${hyp1.topPath?.pathTitle}`);
   console.log(`- Top Likelihood: ${(conf1.topProbability * 100).toFixed(1)}%`);
   console.log(`- Coverage: ${(conf1.coverageFactor * 100).toFixed(1)}%`);
   console.log(`- Missing High Impact Dimensions: [${conf1.missingHighImpactDimensions.join(", ")}]`);
@@ -117,12 +117,12 @@ async function runVerification() {
   if (
     intakeResult.confidence.status === "clarifying" &&
     intakeResult.roadmap === null &&
-    intakeResult.profile.declaredTargetRole === null &&
+    intakeResult.profile.selectedPathId === null &&
     intakeResult.profile.activeRoadmapId === null
   ) {
     console.log("  [PASS] Roadmap and Next-Best Action are strictly null and unavailable in clarifying.\n");
   } else {
-    throw new Error("Test 3 Failed: Roadmap or target role was prematurely set during clarifying!");
+    throw new Error("Test 3 Failed: Roadmap or selected path was prematurely set during clarifying!");
   }
 
   // Test 4: Highest-information-gain question is returned during clarifying

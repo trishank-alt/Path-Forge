@@ -444,8 +444,337 @@ async function runGeminiAdapterTests() {
       throw new Error("Test 9 Failed: Adversarial input was not delimited as untrusted data!");
     }
 
+    // ---------------------------------------------------------
+    // Test 10: Previously-missing dimensions pass the allowlist
+    // ---------------------------------------------------------
+    console.log("Test 10: Extended dimensions (prior_technical_experience, learning_mode, resource_budget, deadline_months) are extracted");
+    global.fetch = (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [{
+          content: {
+            parts: [{
+              text: JSON.stringify({
+                facts: [
+                  { dimension: "prior_technical_experience", value: "CS degree", rawValue: "CS degree", evidence: "I have a CS degree", claimType: "explicit", polarity: "positive" },
+                  { dimension: "learning_mode",              value: "hands_on",  rawValue: "hands-on",  evidence: "I prefer hands-on learning", claimType: "explicit", polarity: "positive" },
+                  { dimension: "resource_budget",            value: "moderate",  rawValue: "some budget", evidence: "willing to pay for some courses", claimType: "inferred", polarity: "positive" },
+                  { dimension: "deadline_months",            value: "6",         rawValue: "6 months",  evidence: "want to be ready in 6 months", claimType: "explicit", polarity: "positive" },
+                ],
+                detectedGoal: null,
+              }),
+            }],
+          },
+        }],
+      }),
+    })) as any;
+
+    const extAdapter = new GeminiLlmAdapter(secretApiKey, "gemini-2.5-flash");
+    const extResult  = await extAdapter.extract({ message: "I have a CS degree, prefer hands-on learning, some budget, 6 months timeline", existingFacts: [], currentHypotheses: [] });
+    const extDims    = extResult.facts.map((f) => f.dimension);
+
+    console.log(`- Extracted dimensions: [${extDims.join(", ")}]`);
+    if (
+      extDims.includes("prior_technical_experience") &&
+      extDims.includes("learning_mode") &&
+      extDims.includes("resource_budget") &&
+      extDims.includes("deadline_months")
+    ) {
+      console.log("  [PASS] All four previously-missing dimensions are extracted and pass the allowlist.\n");
+    } else {
+      throw new Error("Test 10 Failed: One or more extended dimensions were not extracted!");
+    }
+
+    // ---------------------------------------------------------
+    // Test 11: Deterministic reliability mapping from claimType
+    // ---------------------------------------------------------
+    console.log("Test 11: Reliability mapped deterministically (explicit→0.90, inferred→0.70, uncertain→0.50)");
+    global.fetch = (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [{
+          content: {
+            parts: [{
+              text: JSON.stringify({
+                facts: [
+                  { dimension: "primary_language",      value: "Java",         rawValue: "Java",         evidence: "I explicitly use Java", claimType: "explicit",  polarity: "positive" },
+                  { dimension: "target_domain",         value: "enterprise",   rawValue: "enterprise",   evidence: "seems interested in enterprise", claimType: "inferred",  polarity: "positive" },
+                  { dimension: "architecture_preference", value: "microservices", rawValue: "maybe microservices", evidence: "uncertain about architecture", claimType: "uncertain", polarity: "neutral" },
+                ],
+                detectedGoal: null,
+              }),
+            }],
+          },
+        }],
+      }),
+    })) as any;
+
+    const relAdapter  = new GeminiLlmAdapter(secretApiKey, "gemini-2.5-flash");
+    const relResult   = await relAdapter.extract({ message: "I use Java, enterprise maybe, unsure about architecture", existingFacts: [], currentHypotheses: [] });
+    const explicitFact  = relResult.facts.find((f) => f.dimension === "primary_language");
+    const inferredFact  = relResult.facts.find((f) => f.dimension === "target_domain");
+    const uncertainFact = relResult.facts.find((f) => f.dimension === "architecture_preference");
+
+    console.log(`- explicit  → reliability ${explicitFact?.reliability}  (expected 0.90)`);
+    console.log(`- inferred  → reliability ${inferredFact?.reliability}  (expected 0.70)`);
+    console.log(`- uncertain → reliability ${uncertainFact?.reliability} (expected 0.50)`);
+    if (explicitFact?.reliability === 0.90 && inferredFact?.reliability === 0.70 && uncertainFact?.reliability === 0.50) {
+      console.log("  [PASS] Deterministic reliability mapping is correct; model cannot override it.\n");
+    } else {
+      throw new Error("Test 11 Failed: Reliability mapping from claimType is incorrect!");
+    }
+
+    // ---------------------------------------------------------
+    // Test 12: Positive / negative / neutral polarity — no facts dropped, subjects preserved
+    // ---------------------------------------------------------
+    console.log("Test 12: Positive, negative, and neutral polarity facts preserve actual subjects (e.g. Java) and are not dropped");
+    global.fetch = (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [{
+          content: {
+            parts: [{
+              text: JSON.stringify({
+                facts: [
+                  { dimension: "known_skills",    value: "Java",     rawValue: "Java",                             evidence: "I know Java",                           claimType: "explicit", polarity: "positive" },
+                  { dimension: "primary_language", value: "Java",     rawValue: "don't want Java professionally",   evidence: "stated avoidance of Java as primary lang", claimType: "explicit", polarity: "negative" },
+                  { dimension: "hours_per_week",  value: "10",       rawValue: "around 10 hours",                  evidence: "mentioned around 10 hours a week",       claimType: "uncertain", polarity: "neutral" },
+                ],
+                detectedGoal: null,
+              }),
+            }],
+          },
+        }],
+      }),
+    })) as any;
+
+    const polAdapter = new GeminiLlmAdapter(secretApiKey, "gemini-2.5-flash");
+    const polResult  = await polAdapter.extract({ message: "I know Java but don't want it professionally. Around 10h/week.", existingFacts: [], currentHypotheses: [] });
+    const polDims    = polResult.facts.map((f) => f.dimension);
+    const negFact    = polResult.facts.find((f) => f.dimension === "primary_language");
+
+    console.log(`- Facts returned: ${polResult.facts.length} (expected 3)`);
+    console.log(`- Negative polarity fact value: "${negFact?.value}" (expected "Java")`);
+    if (
+      polResult.facts.length === 3 &&
+      polDims.includes("known_skills") &&
+      polDims.includes("primary_language") &&
+      polDims.includes("hours_per_week") &&
+      negFact?.value === "Java"
+    ) {
+      console.log("  [PASS] Positive, negative, and neutral polarity facts all pass through with preserved subject values.\n");
+    } else {
+      throw new Error("Test 12 Failed: Facts with certain polarity values were incorrectly dropped or corrupted!");
+    }
+
+    // ---------------------------------------------------------
+    // Test 13: Contradiction signals are mapped to contradictionSignals (distinct from resolved contradictions)
+    // ---------------------------------------------------------
+    console.log("Test 13: Raw LLM contradiction signals are mapped to contradictionSignals; resolved contradictions remain empty");
+    global.fetch = (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [{
+          content: {
+            parts: [{
+              text: JSON.stringify({
+                facts: [{ dimension: "primary_language", value: "Python", rawValue: "Python", evidence: "I use Python", claimType: "explicit", polarity: "positive" }],
+                detectedGoal: null,
+                contradictionSignals: [{
+                  dimensionA: "primary_language",
+                  dimensionB: "target_domain",
+                  claimA:     "Python",
+                  claimB:     "Enterprise Java ERP",
+                  reason:     "Python is not the typical primary language for Enterprise Java ERP systems.",
+                }],
+              }),
+            }],
+          },
+        }],
+      }),
+    })) as any;
+
+    const ctAdapter = new GeminiLlmAdapter(secretApiKey, "gemini-2.5-flash");
+    const ctResult  = await ctAdapter.extract({ message: "I use Python and want to work on Enterprise Java ERP systems.", existingFacts: [], currentHypotheses: [] });
+
+    console.log(`- Raw contradiction signals mapped: ${ctResult.contradictionSignals?.length || 0} (expected 1)`);
+    console.log(`- Resolved contradictions (domain only): ${ctResult.contradictions.length} (expected 0)`);
+    console.log(`- dimensionA is primary_language: ${ctResult.contradictionSignals?.[0]?.dimensionA === "primary_language"}`);
+    console.log(`- dimensionB is target_domain: ${ctResult.contradictionSignals?.[0]?.dimensionB === "target_domain"}`);
+    if (
+      ctResult.contradictionSignals?.length === 1 &&
+      ctResult.contradictions.length === 0 &&
+      ctResult.contradictionSignals[0].dimensionA === "primary_language" &&
+      ctResult.contradictionSignals[0].dimensionB === "target_domain" &&
+      ctResult.contradictionSignals[0].reason.length > 0
+    ) {
+      console.log("  [PASS] Raw LLM contradiction signals properly separated into contradictionSignals without masquerading as resolved contradictions.\n");
+    } else {
+      throw new Error("Test 13 Failed: Contradiction signals were not correctly separated!");
+    }
+
+    // ---------------------------------------------------------
+    // Test 14: Valid assessment generation conforms to schema
+    // ---------------------------------------------------------
+    console.log("Test 14: generateAssessment() produces a schema-valid AssessmentGenerationResult with adapter-assigned IDs");
+    global.fetch = (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [{
+          content: {
+            parts: [{
+              text: JSON.stringify({
+                questions: [
+                  {
+                    question: "Which of the following best describes the Java Stream API?",
+                    questionType: "single_choice",
+                    options: ["A sequential I/O library", "A functional-style API for processing element sequences", "A networking protocol layer", "A garbage collection strategy"],
+                    difficulty: "intermediate",
+                    rationale: "Tests understanding of core Java 8+ functional programming constructs.",
+                  },
+                  {
+                    question: "Describe a scenario where you would prefer CompletableFuture over a thread pool. What trade-offs would you consider?",
+                    questionType: "free_text",
+                    difficulty: "advanced",
+                    rationale: "Assesses practical knowledge of async patterns in Java.",
+                  },
+                ],
+              }),
+            }],
+          },
+        }],
+      }),
+    })) as any;
+
+    const assessAdapter = new GeminiLlmAdapter(secretApiKey, "gemini-2.5-flash");
+    const assessResult  = await assessAdapter.generateAssessment({ skillId: "java_concurrency", skillTitle: "Java Concurrency & Async", claimedLevel: "intermediate", targetLevel: "proficient", context: "Java backend" });
+
+    console.log(`- skillId: ${assessResult.skillId}`);
+    console.log(`- questions returned: ${assessResult.questions.length}`);
+    console.log(`- adapter-assigned ids: ${assessResult.questions.every((q) => q.id.startsWith("assess_"))}`);
+    console.log(`- targetSkillId set on all: ${assessResult.questions.every((q) => q.targetSkillId === "java_concurrency")}`);
+    if (
+      assessResult.skillId === "java_concurrency" &&
+      assessResult.questions.length === 2 &&
+      assessResult.questions.every((q) => q.id.startsWith("assess_")) &&
+      assessResult.questions.every((q) => q.targetSkillId === "java_concurrency") &&
+      assessResult.questions[0].questionType === "single_choice" &&
+      Array.isArray(assessResult.questions[0].options)
+    ) {
+      console.log("  [PASS] Assessment generation returns a schema-valid result with adapter-assigned IDs.\n");
+    } else {
+      throw new Error("Test 14 Failed: Assessment generation did not produce a valid schema-conforming result!");
+    }
+
+    // ---------------------------------------------------------
+    // Test 15: Reference questions are passed as untrusted input
+    // ---------------------------------------------------------
+    console.log("Test 15: Reference questions are delivered inside the untrusted data block (not the system instruction)");
+    let assessBodyCaptured: any = null;
+    global.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      assessBodyCaptured = JSON.parse(String(init?.body));
+      return {
+        ok: true, status: 200,
+        json: async () => ({
+          candidates: [{
+            content: { parts: [{ text: JSON.stringify({ questions: [{ question: "What is the difference between equals() and == in Java?", questionType: "single_choice", options: ["Value equality", "Reference equality", "Both", "Neither"], difficulty: "basic", rationale: "Tests basic Java equality understanding." }] }) }] },
+          }],
+        }),
+      } as any;
+    }) as any;
+
+    const refAdapter = new GeminiLlmAdapter(secretApiKey, "gemini-2.5-flash");
+    await refAdapter.generateAssessment({
+      skillId: "java_core", skillTitle: "Java Core", claimedLevel: "basic", targetLevel: "working",
+      referenceQuestions: [{ question: "What is the difference between int and Integer in Java?", questionType: "single_choice", options: ["Primitive vs Wrapper", "Same thing", "Integer is faster", "Not sure"], difficulty: "basic" }],
+    });
+
+    const userPayload = assessBodyCaptured?.contents?.[0]?.parts?.[0]?.text || "";
+    console.log(`- Payload starts with untrusted header: ${userPayload.startsWith("[UNTRUSTED DATA TO ANALYZE")}`);
+    console.log(`- Reference question text present in payload: ${userPayload.includes("int and Integer")}`);
+    console.log(`- Reference question text absent from system instruction: ${!(assessBodyCaptured?.systemInstruction?.parts?.[0]?.text || "").includes("int and Integer")}`);
+    if (
+      userPayload.startsWith("[UNTRUSTED DATA TO ANALYZE") &&
+      userPayload.includes("int and Integer") &&
+      !(assessBodyCaptured?.systemInstruction?.parts?.[0]?.text || "").includes("int and Integer")
+    ) {
+      console.log("  [PASS] Reference questions are isolated in the untrusted data block and cannot override system instructions.\n");
+    } else {
+      throw new Error("Test 15 Failed: Reference questions were not correctly isolated as untrusted input data!");
+    }
+
+    // ---------------------------------------------------------
+    // Test 16: Malformed assessment output triggers deterministic fallback
+    // ---------------------------------------------------------
+    console.log("Test 16: Malformed Gemini assessment output triggers deterministic fallback");
+    global.fetch = (async () => ({
+      ok: true, status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({ invalid: "schema", notQuestions: true }) }] } }] }),
+    })) as any;
+
+    const malformAdapter = new GeminiLlmAdapter(secretApiKey, "gemini-2.5-flash");
+    const malformResult  = await malformAdapter.generateAssessment({ skillId: "docker_basics", skillTitle: "Docker Basics", claimedLevel: "intermediate", targetLevel: "proficient" });
+    const malformMeta    = malformAdapter.getLastExecutionMetadata();
+
+    console.log(`- fallbackUsed: ${malformMeta?.fallbackUsed}`);
+    console.log(`- failureCategory: ${malformMeta?.failureCategory}`);
+    console.log(`- skillId preserved: ${malformResult.skillId}`);
+    console.log(`- questions from fallback: ${malformResult.questions.length}`);
+    if (
+      malformMeta?.fallbackUsed === true &&
+      malformMeta?.failureCategory === "invalid_schema" &&
+      malformResult.skillId === "docker_basics" &&
+      malformResult.questions.length > 0
+    ) {
+      console.log("  [PASS] Malformed assessment output triggered deterministic fallback with valid, skill-specific result.\n");
+    } else {
+      throw new Error("Test 16 Failed: Malformed assessment output did not trigger the correct fallback!");
+    }
+
+    // ---------------------------------------------------------
+    // Test 17: Deterministic fallback generates skill-specific questions
+    // ---------------------------------------------------------
+    console.log("Test 17: DeterministicLlmAdapter.generateAssessment() generates correct counts, types, and skill-specific content");
+    const det = new DeterministicLlmAdapter();
+
+    const basicAssess        = await det.generateAssessment({ skillId: "sql_fundamentals", skillTitle: "SQL Fundamentals", claimedLevel: "basic",        targetLevel: "working"    });
+    const intermediateAssess = await det.generateAssessment({ skillId: "react_hooks",      skillTitle: "React Hooks",       claimedLevel: "intermediate",  targetLevel: "proficient" });
+    const advancedAssess     = await det.generateAssessment({ skillId: "kubernetes_ops",   skillTitle: "Kubernetes Operations", claimedLevel: "advanced",  targetLevel: "advanced"   });
+
+    const basicTypes = basicAssess.questions.map((q) => q.questionType);
+    const intTypes   = intermediateAssess.questions.map((q) => q.questionType);
+    const advTypes   = advancedAssess.questions.map((q) => q.questionType);
+
+    console.log(`- basic       → ${basicAssess.questions.length} questions, types: [${basicTypes.join(", ")}]`);
+    console.log(`- intermediate → ${intermediateAssess.questions.length} questions, types: [${intTypes.join(", ")}]`);
+    console.log(`- advanced    → ${advancedAssess.questions.length} questions, types: [${advTypes.join(", ")}]`);
+    console.log(`- basic questions reference "SQL": ${basicAssess.questions.every((q) => q.question.toLowerCase().includes("sql"))}`);
+    console.log(`- all questions have targetSkillId: ${[...basicAssess.questions, ...intermediateAssess.questions, ...advancedAssess.questions].every((q) => !!q.targetSkillId)}`);
+
+    if (
+      basicAssess.questions.length === 2 &&
+      basicTypes.every((t) => t === "single_choice") &&
+      intermediateAssess.questions.length === 3 &&
+      intTypes.filter((t) => t === "single_choice").length === 2 &&
+      intTypes.filter((t) => t === "free_text").length === 1 &&
+      advancedAssess.questions.length === 3 &&
+      advTypes.filter((t) => t === "single_choice").length === 1 &&
+      advTypes.filter((t) => t === "free_text").length === 2 &&
+      basicAssess.questions.every((q) => q.question.toLowerCase().includes("sql")) &&
+      [...basicAssess.questions, ...intermediateAssess.questions, ...advancedAssess.questions].every((q) => !!q.targetSkillId)
+    ) {
+      console.log("  [PASS] Deterministic fallback generates correct counts, types, and skill-specific question text.\n");
+    } else {
+      throw new Error("Test 17 Failed: Deterministic fallback did not generate correct question counts, types, or skill references!");
+    }
+
     console.log("==================================================");
-    console.log("ALL GEMINI ADAPTER REFACTORING TESTS PASSED! (9/9)");
+    console.log("ALL GEMINI ADAPTER REFACTORING TESTS PASSED! (17/17)");
     console.log("==================================================");
   } finally {
     global.fetch = originalFetch;

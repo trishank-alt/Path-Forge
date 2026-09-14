@@ -69,6 +69,7 @@ class InMemoryDataStore {
           status: "clarifying",
           missingDimensions: ["primary_language", "target_domain", "architecture_preference", "hours_per_week"],
           missingHighImpactDimensions: ["primary_language", "target_domain", "architecture_preference", "hours_per_week"],
+          missingMaterialDimensions: ["primary_language", "target_domain", "architecture_preference"],
           assumptions: [],
           contradictions: [],
           explanation: "Initial state. Please declare a learning goal.",

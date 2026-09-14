@@ -1,5 +1,6 @@
-import { CompetencyLevel, CompetencyRecord, SkillNode } from "../../contracts";
+import { CompetencyLevel, CompetencyRecord, SkillEdge, SkillNode, TechnologyEcosystem } from "../../contracts";
 import { SkillGraph } from "./skill-graph";
+import { isSkillCompatible } from "./technology-ecosystem";
 
 export interface SkillGapAnalysisResult {
   skillId: string;
@@ -28,21 +29,58 @@ export class SkillGapService {
   }
 
   /**
-   * Computes individual skill gaps and priorities.
+   * Adapts target skill weights for adaptive paths (e.g. full-stack) based on the learner's chosen technology ecosystem.
+   */
+  public specializeTargetSkillWeights(
+    pathId: string,
+    baseWeights: Record<string, number>,
+    ecosystem: TechnologyEcosystem = "agnostic"
+  ): Record<string, number> {
+    if (pathId === "fullstack_software_engineer") {
+      const specialized = { ...baseWeights };
+      if (ecosystem === "typescript_node") {
+        specialized.nodejs_event_loop = 0.95;
+        specialized.fastify_express = 0.9;
+        specialized.prisma_drizzle_orm = 0.85;
+      } else if (ecosystem === "java_spring") {
+        specialized.java_core = 0.95;
+        specialized.spring_boot_core = 0.95;
+        specialized.spring_data_jpa = 0.85;
+      } else if (ecosystem === "python_fastapi") {
+        specialized.python_foundations = 0.95;
+        specialized.fastapi_framework = 0.95;
+        specialized.sqlalchemy_alembic = 0.85;
+      }
+      return specialized;
+    }
+    return baseWeights;
+  }
+
+  /**
+   * Computes individual skill gaps and priorities with ecosystem compatibility isolation.
    * gap(s) = required_level(s, target) - verified_or_estimated_level(s)
    * priority(s) = target_weight(s) × gap(s) × centrality(s) × urgency(deadline)
    */
   public analyzeGaps(
     targetSkillWeights: Record<string, number>,
     competencies: CompetencyRecord[],
-    deadlineMonths: number = 6
+    deadlineMonths: number = 6,
+    targetEcosystem: TechnologyEcosystem = "agnostic",
+    customGraph?: SkillGraph | { skills: SkillNode[]; edges?: SkillEdge[] }
   ): SkillGapAnalysisResult[] {
+    const graph =
+      customGraph instanceof SkillGraph
+        ? customGraph
+        : customGraph
+        ? new SkillGraph(customGraph.skills, customGraph.edges || [])
+        : this.skillGraph;
+
     const competencyMap = new Map<string, CompetencyRecord>();
     for (const comp of competencies) {
       competencyMap.set(comp.skillId, comp);
     }
 
-    const allRelevantSkillIds = this.skillGraph.resolvePrerequisitesTopological(
+    const allRelevantSkillIds = graph.resolvePrerequisitesTopological(
       Object.keys(targetSkillWeights)
     );
 
@@ -50,8 +88,13 @@ export class SkillGapService {
     const urgency = Math.max(1.0, 12.0 / Math.max(1, deadlineMonths));
 
     for (const skillId of allRelevantSkillIds) {
-      const skill = this.skillGraph.getSkill(skillId);
+      const skill = graph.getSkill(skillId);
       if (!skill) continue;
+
+      // Filter out skills belonging to an incompatible technology ecosystem
+      if (targetEcosystem !== "agnostic" && !isSkillCompatible(skill.ecosystem, targetEcosystem)) {
+        continue;
+      }
 
       const targetWeight = targetSkillWeights[skillId] || 0.6; // baseline for prerequisite
       const record = competencyMap.get(skillId);
@@ -108,3 +151,4 @@ export class SkillGapService {
     return results;
   }
 }
+

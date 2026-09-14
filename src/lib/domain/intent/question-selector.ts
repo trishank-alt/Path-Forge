@@ -1,10 +1,12 @@
 import {
+  ALLOWED_QUESTION_DIMENSIONS,
   PathHypothesis,
   ProfileFact,
   QuestionCandidate,
   QuestionDecision,
 } from "../../contracts";
 import { HypothesisEngine } from "./hypothesis-engine";
+import { isNonCommittalAnswer } from "./path-compatibility-gate";
 
 export class QuestionSelector {
   private hypothesisEngine: HypothesisEngine;
@@ -27,28 +29,87 @@ export class QuestionSelector {
   }
 
   /**
+   * Evaluates whether a candidate question is semantically valid given the learner's active facts and intent hypotheses.
+   */
+  private isCandidateEligible(
+    candidate: QuestionCandidate,
+    answeredDimensions: Set<string>,
+    activeFacts: ProfileFact[]
+  ): boolean {
+    const dim = candidate.dimension.toLowerCase();
+    const allowedSet = new Set<string>(ALLOWED_QUESTION_DIMENSIONS as readonly string[]);
+
+    // 1. Dimension must be supported
+    if (!allowedSet.has(dim)) {
+      return false;
+    }
+
+    // 2. Dimension must not already be answered/known in active facts
+    if (answeredDimensions.has(dim)) {
+      return false;
+    }
+
+    // 3. Question must have non-empty text and valid options
+    if (!candidate.question || candidate.question.trim().length === 0) {
+      return false;
+    }
+
+    // 4. Must not contradict explicit learner facts (e.g. asking for Java when learner is explicit Hardware/VLSI)
+    const goalFacts = activeFacts.filter(
+      (f) => f.dimension === "declared_goal" || f.dimension === "target_role"
+    );
+    const goalText = goalFacts.map((f) => String(f.normalizedValue || f.rawValue)).join(" ").toLowerCase();
+
+    if (goalText.includes("vlsi") || goalText.includes("hardware") || goalText.includes("chip")) {
+      const questionText = candidate.question.toLowerCase();
+      if (
+        questionText.includes("spring boot") ||
+        questionText.includes("fastify") ||
+        questionText.includes("react") ||
+        questionText.includes("web application")
+      ) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  /**
    * Selects the single highest-value question using Information Gain and Product Utility.
-   * IG(q) = H(H|E) - Σ_a P(a|q, E) * H(H|E, a)
-   * Utility = IG × path_impact × answerability - friction - repetition_penalty
+   * Returns null if no semantically eligible candidates exist.
    */
   public selectBestQuestion(
     candidates: QuestionCandidate[],
     currentHypotheses: PathHypothesis[],
     existingFacts: ProfileFact[]
-  ): QuestionDecision {
-    const activeFacts = existingFacts.filter((f) => f.status === "active");
-    const answeredDimensions = new Set(activeFacts.map((f) => f.dimension.toLowerCase()));
-    const currentEntropy = this.calculateEntropy(currentHypotheses);
+  ): QuestionDecision | null {
+    if (!candidates || candidates.length === 0) {
+      return null;
+    }
 
+    const activeFacts = existingFacts.filter((f) => f.status === "active");
+    const answeredDimensions = new Set(
+      activeFacts
+        .filter((f) => !isNonCommittalAnswer(String(f.normalizedValue || f.rawValue || "")))
+        .map((f) => f.dimension.toLowerCase())
+    );
+
+    // 1. Filter out semantically ineligible candidates BEFORE scoring
+    const eligibleCandidates = candidates.filter((c) =>
+      this.isCandidateEligible(c, answeredDimensions, activeFacts)
+    );
+
+    if (eligibleCandidates.length === 0) {
+      return null;
+    }
+
+    const currentEntropy = this.calculateEntropy(currentHypotheses);
     const scoredCandidates: QuestionCandidate[] = [];
 
-    for (const candidate of candidates) {
+    for (const candidate of eligibleCandidates) {
       const dim = candidate.dimension.toLowerCase();
-      const isAlreadyAnswered = answeredDimensions.has(dim);
-
-      // Repetition penalty: severely penalize already answered dimensions
-      const repetitionPenalty = isAlreadyAnswered ? 5.0 : 0.0;
-      const friction = candidate.answerType === "free_text" ? 0.2 : 0.05; // Multiple choice is lower friction
+      const friction = candidate.answerType === "free_text" ? 0.2 : 0.05;
       const answerability = 1.0;
 
       // Estimate Information Gain
@@ -57,7 +118,6 @@ export class QuestionSelector {
       const pPerBucket = 1.0 / answerBuckets.length;
 
       for (const bucket of answerBuckets) {
-        // Simulate evidence addition
         const simulatedFact: ProfileFact = {
           id: "simulated",
           dimension: candidate.dimension,
@@ -79,7 +139,6 @@ export class QuestionSelector {
 
       const informationGain = Math.max(0, currentEntropy - expectedConditionalEntropy);
 
-      // Path Impact: High impact if dimension separates top paths
       let pathImpact = 1.0;
       if (
         dim === "specialization_focus" ||
@@ -93,7 +152,7 @@ export class QuestionSelector {
       }
 
       const utilityScore = Number(
-        (informationGain * pathImpact * answerability + (candidate.why ? 0.1 : 0) - friction - repetitionPenalty).toFixed(4)
+        (informationGain * pathImpact * answerability + (candidate.why ? 0.1 : 0) - friction).toFixed(4)
       );
 
       scoredCandidates.push({
@@ -103,32 +162,19 @@ export class QuestionSelector {
       });
     }
 
+    if (scoredCandidates.length === 0) {
+      return null;
+    }
+
     // Sort descending by utility score
     scoredCandidates.sort((a, b) => b.utilityScore - a.utilityScore);
 
-    const fallbackQuestion: QuestionCandidate = {
-      id: `q_fallback_${Date.now()}`,
-      dimension: "target_domain",
-      question: "Which domain of software engineering or systems architecture would you like to specialize in?",
-      answerType: "single_choice",
-      options: [
-        "Enterprise Systems & Scalable Transactional Backends",
-        "Modern Full-Stack SaaS Products & Web APIs",
-        "Cloud-Native Data Pipelines & Asynchronous Services",
-        "Ethical Cybersecurity & Defensive Security Labs",
-      ],
-      why: "Specialization determines which technical modules and capstone projects compose your roadmap.",
-      predictedAnswerBuckets: ["enterprise", "saas", "data", "security"],
-      informationGain: 0.35,
-      utilityScore: 0.5,
-    };
-
-    const selectedQuestion = scoredCandidates[0] || candidates[0] || fallbackQuestion;
+    const selectedQuestion = scoredCandidates[0];
 
     return {
       selectedQuestion,
-      consideredCandidates: scoredCandidates.length > 0 ? scoredCandidates : [fallbackQuestion],
-      decisionRationale: `Selected '${selectedQuestion.question}' because dimension '${selectedQuestion.dimension}' maximizes information gain (IG: ${selectedQuestion.informationGain || 0.35}, Utility: ${selectedQuestion.utilityScore || 0.5}) and cleanly disambiguates top career paths.`,
+      consideredCandidates: scoredCandidates,
+      decisionRationale: `Selected '${selectedQuestion.question}' because dimension '${selectedQuestion.dimension}' maximizes information gain (IG: ${selectedQuestion.informationGain || 0}, Utility: ${selectedQuestion.utilityScore || 0}) and cleanly disambiguates top career paths.`,
       selectionTimestamp: new Date().toISOString(),
     };
   }

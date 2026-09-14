@@ -25,8 +25,9 @@ export class FactPrecedenceEngine {
     const contradictions: Contradiction[] = [];
 
     for (const incoming of incomingFacts) {
+      const incomingDim = (incoming?.dimension || "").toLowerCase();
       const existingActiveIndex = updatedFacts.findIndex(
-        (f) => f.dimension.toLowerCase() === incoming.dimension.toLowerCase() && f.status === "active"
+        (f) => (f?.dimension || "").toLowerCase() === incomingDim && f.status === "active"
       );
 
       if (existingActiveIndex === -1) {
