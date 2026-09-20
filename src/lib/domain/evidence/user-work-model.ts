@@ -117,7 +117,14 @@ export class UserWorkModelManager {
 
     // 3. Activity dimensions
     else if (dim.startsWith("activity:") || dim === "activities" || dim === "work_type") {
-      const actName = dim.startsWith("activity:") ? dim.replace("activity:", "") : valStr;
+      const rawDimName = dim.startsWith("activity:") ? dim.replace("activity:", "") : valStr;
+      const actName =
+        dim === "activity:avoided" ||
+        dim === "activity:desired" ||
+        dim === "activity:disliked" ||
+        dim === "activity:preferred"
+          ? valStr
+          : rawDimName;
       const actKey = actName.toLowerCase().trim();
       const existing = this.model.activities[actKey] || {
         id: `act_${actKey}`,
@@ -131,12 +138,31 @@ export class UserWorkModelManager {
         existing.evidenceIds.push(id);
       }
 
-      if (isNegative) {
+      if (dim === "activity:avoided") {
+        existing.affinity = "avoided";
+      } else if (dim === "activity:desired") {
+        existing.affinity = "preferred";
+      } else if (isNegative) {
         existing.affinity = "disliked";
       } else if (valStr.toLowerCase().includes("love") || valStr.toLowerCase().includes("enjoy")) {
         existing.affinity = "preferred";
       }
       this.model.activities[actKey] = existing;
+
+      const rawDimKey = rawDimName.toLowerCase().trim();
+      if (rawDimKey !== actKey && rawDimKey.length > 0) {
+        this.model.activities[rawDimKey] = existing;
+      }
+    }
+
+    // 3b. Direction continuity dimensions
+    else if (dim === "direction:continuity") {
+      if (!this.model.negativeSignals["direction:continuity"]) {
+        this.model.negativeSignals["direction:continuity"] = [];
+      }
+      if (!this.model.negativeSignals["direction:continuity"].includes(valStr)) {
+        this.model.negativeSignals["direction:continuity"].push(valStr);
+      }
     }
 
     // 4. Work characteristic dimensions

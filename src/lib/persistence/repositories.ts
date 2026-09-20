@@ -101,7 +101,7 @@ class InMemoryDataStore {
   }
 }
 
-const dataStore = new InMemoryDataStore();
+export const dataStore = new InMemoryDataStore();
 
 export class ProfileRepository {
   public async getProfile(profileId: string = "demo_learner_1"): Promise<LearnerProfile> {
@@ -226,28 +226,120 @@ export class DecisionRepository {
 }
 
 export class PhaseRepository {
-  public async savePhase(profileId: string, phase: RoadmapPhase): Promise<void> {
-    const list = dataStore.phases.get(profileId) || [];
-    const existingIdx = list.findIndex(
-      (p) => p.id === phase.id || (p.phaseNumber === phase.phaseNumber && p.status !== "completed")
-    );
-    if (existingIdx >= 0) {
-      list[existingIdx] = JSON.parse(JSON.stringify(phase));
-    } else {
-      list.push(JSON.parse(JSON.stringify(phase)));
+  /**
+   * Creates a new phase. Accepts ONLY status === 'in_progress'.
+   * Rejects 'planned', 'adapted', 'completed', 'superseded'.
+   * Rejects if another active phase already exists for profileId.
+   */
+  public async createPhase(profileId: string, phase: RoadmapPhase): Promise<void> {
+    if (phase.status !== "in_progress") {
+      throw new Error(
+        `createPhase rejected: new phases must have status 'in_progress', received '${phase.status}'.`
+      );
     }
+    const list = dataStore.phases.get(profileId) || [];
+    const existingActive = list.find((p) => p.status === "in_progress");
+    if (existingActive) {
+      throw new Error(
+        `createPhase rejected: active phase '${existingActive.id}' is already in progress for profile '${profileId}'. Transition it before creating a new phase.`
+      );
+    }
+    list.push(JSON.parse(JSON.stringify(phase)));
     dataStore.phases.set(profileId, list);
   }
 
-  public async getPhases(profileId: string): Promise<RoadmapPhase[]> {
+  /**
+   * @deprecated Use createPhase for new phases, or transitionPhase for lifecycle state changes.
+   * Backward-compatible fallback that prevents illegal state mutations.
+   */
+  public async savePhase(profileId: string, phase: RoadmapPhase): Promise<void> {
+    const list = dataStore.phases.get(profileId) || [];
+    const existingIdx = list.findIndex((p) => p.id === phase.id);
+    if (existingIdx >= 0) {
+      if (list[existingIdx].status !== "in_progress" && phase.status === "in_progress") {
+        throw new Error(
+          `savePhase rejected: cannot reactivate terminal phase '${phase.id}' with status '${list[existingIdx].status}'.`
+        );
+      }
+      list[existingIdx] = JSON.parse(JSON.stringify(phase));
+      dataStore.phases.set(profileId, list);
+      return;
+    }
+    const existingActive = list.find((p) => p.status === "in_progress");
+    if (existingActive) {
+      existingActive.status = "superseded";
+      existingActive.supersededAt = new Date().toISOString();
+      existingActive.supersessionReason = "Superseded by newly saved phase";
+    }
+    return this.createPhase(profileId, phase);
+  }
+
+  /**
+   * Returns the single active phase (status === 'in_progress').
+   * Returns null if no active phase exists. NEVER returns planned or adapted.
+   */
+  public async getActivePhase(profileId: string): Promise<RoadmapPhase | null> {
+    const list = dataStore.phases.get(profileId) || [];
+    const active = list.find((p) => p.status === "in_progress");
+    return active ? JSON.parse(JSON.stringify(active)) : null;
+  }
+
+  /**
+   * Returns the full sequential phase history (completed, superseded, and active) for the learner.
+   */
+  public async getPhaseHistory(profileId: string): Promise<RoadmapPhase[]> {
     const list = dataStore.phases.get(profileId) || [];
     return JSON.parse(JSON.stringify(list));
   }
 
-  public async getActivePhase(profileId: string): Promise<RoadmapPhase | null> {
+  /**
+   * Alias for getPhaseHistory for backward compatibility.
+   */
+  public async getPhases(profileId: string): Promise<RoadmapPhase[]> {
+    return this.getPhaseHistory(profileId);
+  }
+
+  /**
+   * Transitions an active phase to a terminal state (completed or superseded).
+   * Rejects transitions from terminal states.
+   */
+  public async transitionPhase(
+    profileId: string,
+    phaseId: string,
+    transition: {
+      toStatus: "completed" | "superseded";
+      decisionId: string;
+      reason?: string;
+      timestamp?: string;
+    }
+  ): Promise<RoadmapPhase> {
     const list = dataStore.phases.get(profileId) || [];
-    const active = list.find((p) => p.status === "in_progress" || p.status === "planned");
-    return active ? JSON.parse(JSON.stringify(active)) : null;
+    const phaseIndex = list.findIndex((p) => p.id === phaseId);
+    if (phaseIndex < 0) {
+      throw new Error(`transitionPhase rejected: phase '${phaseId}' not found for profile '${profileId}'.`);
+    }
+
+    const phase = list[phaseIndex];
+    if (phase.status !== "in_progress") {
+      throw new Error(
+        `transitionPhase rejected: cannot transition phase '${phaseId}' with terminal status '${phase.status}'. Only 'in_progress' phases can be transitioned.`
+      );
+    }
+
+    const now = transition.timestamp || new Date().toISOString();
+    if (transition.toStatus === "completed") {
+      phase.status = "completed";
+      phase.completedAt = now;
+    } else if (transition.toStatus === "superseded") {
+      phase.status = "superseded";
+      phase.supersededAt = now;
+      phase.supersededByDecisionId = transition.decisionId;
+      phase.supersessionReason = transition.reason || "Phase superseded by planning decision.";
+    }
+
+    list[phaseIndex] = phase;
+    dataStore.phases.set(profileId, list);
+    return JSON.parse(JSON.stringify(phase));
   }
 }
 

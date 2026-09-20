@@ -3,14 +3,14 @@
 import React, { useState, useEffect } from "react";
 import { Navigation } from "@/components/Navigation";
 import { IntakeChat, ChatMessageItem } from "@/components/IntakeChat";
-import { NextBestActionCard } from "@/components/NextBestActionCard";
-import { RoadmapTimeline } from "@/components/RoadmapTimeline";
+import { CurrentInterventionPanel } from "@/components/CurrentInterventionPanel";
 import { SkillMatrix } from "@/components/SkillMatrix";
 import { ScenarioStudio } from "@/components/ScenarioStudio";
 import { FactInspectorModal } from "@/components/FactInspectorModal";
 import { SettingsModal } from "@/components/SettingsModal";
 import { DiagnosticQuizModal } from "@/components/DiagnosticQuizModal";
 import { UserAuthModal } from "@/components/UserAuthModal";
+import { translateDecisionToDialogue } from "@/lib/conversational/dialogue-translator";
 import {
   LearnerProfile,
   NextBestAction,
@@ -127,6 +127,8 @@ export default function Home() {
     };
     setChatMessages((prev) => [...prev, userMsg]);
 
+    const prevPhase = profile?.activePhase || null;
+
     try {
       const llmSettings = getLlmSettings();
       const provider = forceProvider || llmSettings.provider;
@@ -163,29 +165,30 @@ export default function Home() {
         setRoadmap(null);
       }
 
-      // Assistant response text
-      let replyText = "I've analyzed your input and updated your profile attributes.";
-      if (data.activeQuestion?.selectedQuestion?.dimension === "confirm_goal_change") {
-        replyText = "It looks like you may be switching your target career. Please confirm below so I can align your curriculum recommendations:";
-      } else if (data.roadmap) {
-        replyText = `Target identified: ${data.profile?.declaredTargetRole || "Verified Track"}. Generated your customized learning milestones.`;
-      } else if (data.decision?.recommendation) {
-        replyText = `Not sure which direction to take? Here are the supported options for ${data.profile?.declaredTargetRole || "your track"}, highlighted by industry demand:`;
-      } else if (data.decision?.eligibility === "unsupported_intent") {
-        replyText = data.decision?.explanation || "PathFinder cannot currently establish a verified curriculum for this goal.";
-      } else if (data.decision?.eligibility === "infeasible") {
-        replyText = data.decision?.explanation || "Your target roadmap requires more time than your current pace allows.";
-      } else if (data.activeQuestion) {
-        replyText = `Extracted technical dimensions from your goal. Let's clarify a few details to tailor your curriculum:`;
-      } else if (data.extractedFacts && data.extractedFacts.length > 0) {
-        replyText = `Extracted ${data.extractedFacts.length} technical dimensions from your goal.`;
-      }
+      // Translate planning decision and resulting state into natural dialogue
+      const latestDecision =
+        data.profile?.decisions && data.profile.decisions.length > 0
+          ? data.profile.decisions[data.profile.decisions.length - 1]
+          : null;
+
+      const translation = translateDecisionToDialogue({
+        userMessage: message,
+        decision: latestDecision,
+        activePhase: data.profile?.activePhase || null,
+        previousPhase: prevPhase,
+        workModel: data.profile?.workModel || null,
+        activeQuestion: data.activeQuestion || null,
+        extractedFactsCount: data.extractedFacts?.length || 0,
+      });
 
       const assistantMsg: ChatMessageItem = {
         id: `asst_${Date.now()}`,
         sender: "assistant",
-        text: replyText,
+        text: translation.replyText,
         timestamp: getFormattedTime(),
+        inlineEvent: translation.inlineEvent,
+        suggestedChips: translation.suggestedChips,
+        transparentReasoning: translation.transparentReasoning,
         facts: data.extractedFacts,
         question: data.activeQuestion,
         decision: data.decision,
@@ -220,14 +223,16 @@ export default function Home() {
     setIsLoading(true);
     setLastAction({ type: "answer", payload: { dimension, answer } });
 
-    // Append user answer bubble
+    const answerText = Array.isArray(answer) ? answer.join(", ") : String(answer);
     const userMsg: ChatMessageItem = {
       id: `user_ans_${Date.now()}`,
       sender: "user",
-      text: Array.isArray(answer) ? answer.join(", ") : String(answer),
+      text: answerText,
       timestamp: getFormattedTime(),
     };
     setChatMessages((prev) => [...prev, userMsg]);
+
+    const prevPhase = profile?.activePhase || null;
 
     try {
       const llmSettings = getLlmSettings();
@@ -267,24 +272,29 @@ export default function Home() {
         setRoadmap(null);
       }
 
-      let replyText = `Captured preference for ${dimension.replace(/_/g, " ")}.`;
-      if (data.roadmap) {
-        replyText = "Target path verified! Your customized learning roadmap is ready below.";
-      } else if (data.decision?.recommendation) {
-        replyText = `Here are the supported directions for your path, highlighted by market demand:`;
-      } else if (data.decision?.eligibility === "unsupported_intent") {
-        replyText = data.decision?.explanation || "PathFinder cannot currently establish a verified curriculum for this goal.";
-      } else if (data.decision?.eligibility === "infeasible") {
-        replyText = data.decision?.explanation || "Your target roadmap requires more time than your current pace allows.";
-      } else if (data.activeQuestion) {
-        replyText = "Got it! Here is the next question to finalize your curriculum:";
-      }
+      const latestDecision =
+        data.profile?.decisions && data.profile.decisions.length > 0
+          ? data.profile.decisions[data.profile.decisions.length - 1]
+          : null;
+
+      const translation = translateDecisionToDialogue({
+        userMessage: answerText,
+        decision: latestDecision,
+        activePhase: data.profile?.activePhase || null,
+        previousPhase: prevPhase,
+        workModel: data.profile?.workModel || null,
+        activeQuestion: data.activeQuestion || null,
+        extractedFactsCount: data.extractedFacts?.length || 0,
+      });
 
       const assistantMsg: ChatMessageItem = {
         id: `asst_ans_${Date.now()}`,
         sender: "assistant",
-        text: replyText,
+        text: translation.replyText,
         timestamp: getFormattedTime(),
+        inlineEvent: translation.inlineEvent,
+        suggestedChips: translation.suggestedChips,
+        transparentReasoning: translation.transparentReasoning,
         facts: data.extractedFacts,
         question: data.activeQuestion,
         decision: data.decision,
@@ -310,12 +320,58 @@ export default function Home() {
     }
   };
 
-  // 3. Switch to Deterministic Engine Fallback
+  // 3. Submit Work & Reflect (passes through EvidenceEngine -> DecisionEngine)
+  const handleSubmitWorkAndReflect = async (phaseId: string) => {
+    setIsLoading(true);
+    const prevPhase = profile?.activePhase || null;
+
+    try {
+      const res = await fetch(`/api/v1/profiles/me/phases/${phaseId}/submit`, {
+        method: "POST",
+        headers: getHeaders(),
+        body: JSON.stringify({
+          notes: `Completed practical project deliverable and reflection for phase ${phaseId}`,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.profile) setProfile(data.profile);
+        if (data.roadmap) setRoadmap(data.roadmap);
+
+        const translation = translateDecisionToDialogue({
+          userMessage: "Submitted practical deliverable & reflection",
+          decision: data.nextDecision || null,
+          activePhase: data.nextPhase || data.profile?.activePhase || null,
+          previousPhase: data.completedPhase || prevPhase,
+          workModel: data.profile?.workModel || null,
+          activeQuestion: data.nextDecision?.activeQuestion || null,
+        });
+
+        const assistantMsg: ChatMessageItem = {
+          id: `asst_submit_${Date.now()}`,
+          sender: "assistant",
+          text: translation.replyText,
+          timestamp: getFormattedTime(),
+          inlineEvent: translation.inlineEvent,
+          suggestedChips: translation.suggestedChips,
+          transparentReasoning: translation.transparentReasoning,
+        };
+
+        setChatMessages((prev) => [...prev, assistantMsg]);
+      }
+    } catch (err: any) {
+      console.error("Error submitting work deliverable:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 4. Switch to Deterministic Engine Fallback
   const handleSwitchToDeterministic = async () => {
     sessionStorage.setItem("pathfinder_provider", "deterministic");
     sessionStorage.setItem("pathfinder_model", "rule-engine-v1");
 
-    // Re-run last failed action with deterministic provider
     if (lastAction?.type === "message") {
       await handleSendMessage(lastAction.payload.message, "deterministic");
     } else if (lastAction?.type === "answer") {
@@ -325,7 +381,7 @@ export default function Home() {
     }
   };
 
-  // 4. Retry Last Action
+  // 5. Retry Last Action
   const handleRetryLastAction = async () => {
     if (lastAction?.type === "message") {
       await handleSendMessage(lastAction.payload.message);
@@ -334,13 +390,13 @@ export default function Home() {
     }
   };
 
-  // 5. Preset Quick Loader
+  // 6. Preset Quick Loader
   const handleSelectPreset = async (preset: { title: string; initialMessage: string }) => {
     await handleReset();
     await handleSendMessage(preset.initialMessage);
   };
 
-  // 6. Reset Session (Start Fresh with Roadmap Archiving)
+  // 7. Reset Session
   const handleReset = async () => {
     setIsLoading(true);
     try {
@@ -357,7 +413,6 @@ export default function Home() {
         setChatMessages([]);
         setLastAction(null);
 
-        // Reload history so the archived roadmap appears in Saved Roadmaps
         const histRes = await fetch("/api/v1/profiles/me/roadmaps/history", {
           headers: getHeaders(),
         });
@@ -373,28 +428,7 @@ export default function Home() {
     }
   };
 
-  // Switch Active Roadmap
-  const handleSwitchRoadmap = async (targetRoadmapId: string) => {
-    setIsLoading(true);
-    try {
-      const res = await fetch("/api/v1/profiles/me/roadmaps/switch", {
-        method: "POST",
-        headers: getHeaders(),
-        body: JSON.stringify({ roadmapId: targetRoadmapId }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setProfile(data.profile);
-        setRoadmap(data.roadmap);
-      }
-    } catch (err) {
-      console.error("Error switching roadmap:", err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // 5. Correct/Revoke Fact
+  // 8. Correct / Revoke Fact
   const handleCorrectFact = async (factId: string, newValue: any, reason?: string) => {
     try {
       const res = await fetch(`/api/v1/profiles/me/facts/${factId}`, {
@@ -405,17 +439,6 @@ export default function Home() {
       if (res.ok) {
         const data = await res.json();
         setProfile(data.profile);
-        if (data.roadmapStale && profile?.activeRoadmapId) {
-          // Re-generate roadmap
-          const rmRes = await fetch("/api/v1/profiles/me/roadmaps", {
-            method: "POST",
-            headers: getHeaders(),
-          });
-          if (rmRes.ok) {
-            const newRm = await rmRes.json();
-            setRoadmap(newRm);
-          }
-        }
       }
     } catch (err) {
       console.error("Error correcting fact:", err);
@@ -437,7 +460,7 @@ export default function Home() {
     }
   };
 
-  // 6. Create Scenario
+  // 9. Create / Adopt Scenario
   const handleCreateScenario = async (name: string, overrides: Scenario["overrides"]) => {
     if (!roadmap) return;
     setIsLoading(true);
@@ -471,7 +494,17 @@ export default function Home() {
     }
   };
 
-  // 7. Submit Diagnostic Quiz
+  // 10. Switch Learner Profile
+  const handleSwitchLearner = (newLearnerId: string) => {
+    setLearnerId(newLearnerId);
+    localStorage.setItem("pathfinder_learner_id", newLearnerId);
+    setRoadmap(null);
+    setActiveQuestion(null);
+    setScenarios([]);
+    loadInitialData(newLearnerId);
+  };
+
+  // Diagnostic Quiz submission
   const handleSubmitDiagnostic = async (skillId: string, score: number, passed: boolean) => {
     try {
       const res = await fetch(`/api/v1/assessments/diag_${skillId}/attempts`, {
@@ -495,61 +528,11 @@ export default function Home() {
     }
   };
 
-  // 8. Switch Learner / Profile
-  const handleSwitchLearner = (newLearnerId: string, newLearnerName?: string) => {
-    setLearnerId(newLearnerId);
-    localStorage.setItem("pathfinder_learner_id", newLearnerId);
-    setRoadmap(null);
-    setActiveQuestion(null);
-    setScenarios([]);
-    loadInitialData(newLearnerId);
-  };
-
-  // 9. Execute NBA
-  const handleExecuteAction = (action: NextBestAction) => {
-    if (action.type === "assessment" && action.skillId) {
-      setDiagnosticSkillId(action.skillId);
-    } else if (action.type === "clarification") {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    } else if (action.resourceId && roadmap) {
-      const resource = roadmap.milestones
-        .flatMap((m) => m.resources)
-        .find((r) => r.id === action.resourceId);
-      if (resource?.url) {
-        window.open(resource.url, "_blank");
-      }
-    }
-  };
-
-  const handleCompleteMilestone = async (milestoneId: string) => {
-    if (!roadmap) return;
-    try {
-      setIsLoading(true);
-      const res = await fetch(`/api/v1/profiles/me/phases/${milestoneId}/submit`, {
-        method: "POST",
-        headers: getHeaders(),
-        body: JSON.stringify({
-          notes: `Completed phase deliverable for milestone ${milestoneId}`,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.profile) setProfile(data.profile);
-        if (data.roadmap) setRoadmap(data.roadmap);
-        if (data.nextDecision?.mode === "disambiguate" && data.nextDecision.activeQuestion?.selectedQuestion) {
-          setActiveQuestion(data.nextDecision.activeQuestion.selectedQuestion.dimension);
-        }
-      }
-    } catch (err) {
-      console.error("Error submitting phase completion:", err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const hasActivePhase = Boolean(profile?.activePhase);
 
   return (
-    <div className="min-h-screen flex flex-col">
-      {/* Top Navigation */}
+    <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100 selection:bg-cyan-500 selection:text-slate-950">
+      {/* Top Header Navigation */}
       <Navigation
         profile={profile}
         roadmap={roadmap}
@@ -563,52 +546,67 @@ export default function Home() {
         setActiveTab={setActiveTab}
       />
 
-      {/* Main App Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-8 space-y-6">
-        {/* Next-Best Action Spotlight (ONLY displayed when readiness gate passes: intentState === 'ready') */}
-        {profile?.intent.status === "ready" && roadmap?.nextBestAction && (
-          <NextBestActionCard
-            action={roadmap.nextBestAction}
-            onExecuteAction={handleExecuteAction}
-          />
+      {/* Main Dynamic View Container */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-6 flex flex-col min-h-0">
+        {activeTab === "roadmap" && (
+          hasActivePhase ? (
+            /* ACTIVE INTERVENTION STATE: Side-by-Side Dynamic Grid */
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 min-h-[calc(100vh-9.5rem)]">
+              {/* Left Column: Primary Conversation (7 cols desktop, 8 on xl) */}
+              <div className="lg:col-span-7 xl:col-span-8 h-full min-h-[500px]">
+                <IntakeChat
+                  profile={profile}
+                  activeQuestion={activeQuestion}
+                  messages={chatMessages}
+                  onSendMessage={handleSendMessage}
+                  onAnswerQuestion={handleAnswerQuestion}
+                  isLoading={isLoading}
+                  onOpenSettings={() => setIsSettingsOpen(true)}
+                  onSwitchToDeterministic={handleSwitchToDeterministic}
+                  onRetryLastAction={handleRetryLastAction}
+                />
+              </div>
+
+              {/* Right Column: Persistent "What We're Doing" Panel (5 cols desktop, 4 on xl) */}
+              <div className="lg:col-span-5 xl:col-span-4 h-full min-h-[500px]">
+                <CurrentInterventionPanel
+                  roadmap={roadmap}
+                  activePhase={profile?.activePhase || null}
+                  phaseHistory={profile?.phaseHistory || []}
+                  onSubmitWorkAndReflect={handleSubmitWorkAndReflect}
+                  isLoading={isLoading}
+                />
+              </div>
+            </div>
+          ) : (
+            /* DISCOVERY STATE: Focused Conversation Only (No premature roadmap) */
+            <div className="max-w-3xl w-full mx-auto flex-1 min-h-[calc(100vh-9.5rem)]">
+              <IntakeChat
+                profile={profile}
+                activeQuestion={activeQuestion}
+                messages={chatMessages}
+                onSendMessage={handleSendMessage}
+                onAnswerQuestion={handleAnswerQuestion}
+                isLoading={isLoading}
+                onOpenSettings={() => setIsSettingsOpen(true)}
+                onSwitchToDeterministic={handleSwitchToDeterministic}
+                onRetryLastAction={handleRetryLastAction}
+              />
+            </div>
+          )
         )}
 
-        <div className="grid grid-cols-1 gap-6">
-          <div className="h-[520px]">
-            <IntakeChat
-              profile={profile}
-              activeQuestion={activeQuestion}
-              messages={chatMessages}
-              onSendMessage={handleSendMessage}
-              onAnswerQuestion={handleAnswerQuestion}
-              isLoading={isLoading}
-              onOpenSettings={() => setIsSettingsOpen(true)}
-              onSwitchToDeterministic={handleSwitchToDeterministic}
-              onRetryLastAction={handleRetryLastAction}
-            />
-          </div>
-        </div>
-
-        {/* Tabbed View Section: Roadmap vs Skills vs Scenarios */}
-        <section className="pt-2">
-          {activeTab === "roadmap" && (
-            <RoadmapTimeline
-              roadmap={roadmap}
-              savedRoadmaps={savedRoadmaps}
-              onOpenDiagnostic={(skillId) => setDiagnosticSkillId(skillId)}
-              onCompleteMilestone={handleCompleteMilestone}
-              onSwitchRoadmap={handleSwitchRoadmap}
-            />
-          )}
-
-          {activeTab === "skills" && (
+        {activeTab === "skills" && (
+          <div className="flex-1 py-2">
             <SkillMatrix
               competencies={profile?.competencies || []}
               onOpenDiagnostic={(skillId) => setDiagnosticSkillId(skillId)}
             />
-          )}
+          </div>
+        )}
 
-          {activeTab === "scenarios" && (
+        {activeTab === "scenarios" && (
+          <div className="flex-1 py-2">
             <ScenarioStudio
               profile={profile}
               roadmap={roadmap}
@@ -617,8 +615,8 @@ export default function Home() {
               onAdoptScenario={handleAdoptScenario}
               isLoading={isLoading}
             />
-          )}
-        </section>
+          </div>
+        )}
       </main>
 
       {/* Modals */}
@@ -644,7 +642,6 @@ export default function Home() {
         onClose={() => setIsSettingsOpen(false)}
         onSaveSettings={() => {}}
       />
-
 
       <DiagnosticQuizModal
         skillId={diagnosticSkillId}

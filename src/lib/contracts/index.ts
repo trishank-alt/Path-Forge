@@ -10,6 +10,7 @@ export const FactSourceSchema = z.enum([
   "assessment_evidence",
   "experiment_observation",
   "reflection",
+  "phase_reflection",
   "linked_artifact",
   "self_report",
   "llm_inference",
@@ -31,6 +32,7 @@ export type EvidenceStatus = FactStatus;
 
 export const EvidenceProvenanceSchema = z.object({
   sourceEventId: z.string().optional(),
+  phaseId: z.string().optional(),
   originalText: z.string().optional(),
   extractedBy: z.string().optional(),
   priorEvidenceId: z.string().optional(),
@@ -454,6 +456,7 @@ export const MilestoneStatusSchema = z.enum([
   "in_progress",
   "completed",
   "skipped_proficient",
+  "superseded",
 ]);
 export type MilestoneStatus = z.infer<typeof MilestoneStatusSchema>;
 
@@ -735,7 +738,9 @@ export const RoadmapPhaseSchema = z.object({
     totalHours: z.number(),
     weeklyHours: z.number(),
   }),
-  capabilityTargets: z.array(z.string()),
+  capabilityTargets: z.array(z.string()).default([]),
+  activityTargets: z.array(z.string()).default([]),
+  characteristicTargets: z.array(z.string()).default([]) ,
   activities: z.array(
     z.object({
       id: z.string(),
@@ -752,17 +757,29 @@ export const RoadmapPhaseSchema = z.object({
     possibleOutcomes: z.array(z.string()),
   }),
   resources: z.array(LearningResourceSchema).default([]),
-  status: z.enum(["planned", "in_progress", "completed", "adapted"]).default("planned"),
+  status: z.enum(["planned", "in_progress", "completed", "adapted", "superseded"]).default("in_progress"),
   explanation: z.string().optional(),
+  createdByDecisionId: z.string().optional(),
+  supersededByDecisionId: z.string().optional(),
+  supersededAt: z.string().optional(),
+  supersessionReason: z.string().optional(),
+  completedAt: z.string().optional(),
 });
 export type RoadmapPhase = z.infer<typeof RoadmapPhaseSchema>;
+
+export const PhaseDispositionSchema = z.enum(["continue", "complete", "supersede"]);
+export type PhaseDisposition = z.infer<typeof PhaseDispositionSchema>;
 
 export const PlanningDecisionSchema = z.object({
   id: z.string(),
   profileId: z.string(),
   mode: DecisionModeSchema,
+  phaseDisposition: PhaseDispositionSchema.default("continue"),
   primaryObjective: z.string(),
   targetCandidateDirection: z.string().nullable().optional(),
+  previousActivePhaseId: z.string().nullable().optional(),
+  activePhaseId: z.string().nullable().optional(),
+  createdPhaseId: z.string().nullable().optional(),
   activePhase: RoadmapPhaseSchema.nullable().optional(),
   activeQuestion: QuestionDecisionSchema.nullable().optional(),
   activeExperiment: ExperimentPlanSchema.nullable().optional(),
@@ -775,8 +792,16 @@ export type PlanningDecision = z.infer<typeof PlanningDecisionSchema>;
 export const ReflectionSubmissionSchema = z.object({
   phaseId: z.string().optional(),
   experimentId: z.string().optional(),
+  completesPhase: z.boolean().optional(),
+  overallExperience: z.enum(["positive", "neutral", "negative", "mixed"]).optional(),
   enjoyed: z.string().optional(),
   disliked: z.string().optional(),
+  wantMoreOf: z.string().optional(),
+  wantToAvoid: z.string().optional(),
+  matchedExpectations: z.boolean().optional(),
+  selfDiscovery: z.string().optional(),
+  wouldChange: z.string().optional(),
+  continueDirection: z.enum(["continue", "pivot", "explore_alternatives"]).optional(),
   voluntarilyExplored: z.string().optional(),
   energizing: z.string().optional(),
   exhausting: z.string().optional(),
@@ -806,6 +831,7 @@ export const LearnerProfileSchema = z.object({
   evidenceHistory: z.array(EvidenceItemSchema).optional(),
   activePhase: RoadmapPhaseSchema.nullable().optional(),
   completedPhases: z.array(RoadmapPhaseSchema).optional(),
+  phaseHistory: z.array(RoadmapPhaseSchema).optional(),
   decisions: z.array(PlanningDecisionSchema).optional(),
   candidateDirections: z.array(CandidateDirectionSchema).optional(),
   createdAt: z.string(),

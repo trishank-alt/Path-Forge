@@ -1,7 +1,9 @@
+import { randomUUID } from "crypto";
 import {
   CandidateDirection,
   DecisionMode,
   ExperimentPlan,
+  PhaseDisposition,
   PlanningDecision,
   QuestionCandidate,
   QuestionDecision,
@@ -12,12 +14,23 @@ import { CandidateGenerator, candidateGenerator } from "../candidates/candidate-
 import { DomainKnowledge, domainKnowledge } from "../knowledge/domain-knowledge";
 
 export interface DecisionEngineInput {
+  decisionId?: string;
   profileId: string;
   workModel: UserWorkModel;
   declaredGoal?: string | null;
+  activePhase?: RoadmapPhase | null;
   completedPhases?: RoadmapPhase[];
+  phaseHistory?: RoadmapPhase[];
   recentObservations?: string[];
   proposedQuestions?: QuestionCandidate[];
+  isPhaseCompletion?: boolean;
+}
+
+export interface ActivePhaseAlignmentResult {
+  aligned: boolean;
+  reason?: string;
+  contradictedTargetIds?: string[];
+  contradictedDimensions?: string[];
 }
 
 export class DecisionEngine {
@@ -33,16 +46,146 @@ export class DecisionEngine {
   }
 
   /**
-   * Evaluates current UserWorkModel state and determines the next best planning action:
-   * - Commit (generate next phase)
-   * - Disambiguate (ask targeted question)
-   * - Explore (run practical experiment)
-   *
-   * Candidate generation is conditional (consulted when comparing directions or clarifying targets).
+   * Evaluates structured alignment between the active phase's targets and the current UserWorkModel.
+   * Enforces the rule:
+   * - A single weak preference, difficulty statement, unrelated interest, or side interest MUST NOT supersede.
+   * - Explicit directional rejection OR corroborated accumulated incompatibility DOES supersede.
+   */
+  public evaluateActivePhaseAlignment(
+    activePhase: RoadmapPhase,
+    workModel: UserWorkModel,
+    declaredGoal?: string | null
+  ): ActivePhaseAlignmentResult {
+    const contradictedTargetIds: string[] = [];
+    const contradictedDimensions: string[] = [];
+
+    // 1. Explicit Direction Continuity Pivot (e.g. from reflection)
+    const directionSignals = workModel.negativeSignals["direction:continuity"] || [];
+    if (
+      directionSignals.includes("pivot") ||
+      directionSignals.includes("explore_alternatives")
+    ) {
+      return {
+        aligned: false,
+        reason: "User explicitly signaled a directional pivot away from current track.",
+        contradictedTargetIds: [activePhase.id],
+        contradictedDimensions: ["direction:continuity"],
+      };
+    }
+
+    // 2. Explicit Directional Rejection Signals in Negative Signals
+    const phaseTokens = [
+      activePhase.objective.toLowerCase(),
+      ...activePhase.capabilityTargets.map((c) => c.toLowerCase()),
+      ...activePhase.activityTargets.map((a) => a.toLowerCase()),
+      ...activePhase.activities.map((a) => a.title.toLowerCase()),
+    ];
+
+    for (const [dim, signals] of Object.entries(workModel.negativeSignals)) {
+      for (const sig of signals) {
+        const sigLower = sig.toLowerCase();
+        const isExplicitRejection =
+          sigLower.includes("don't want") ||
+          sigLower.includes("dont want") ||
+          sigLower.includes("do not want") ||
+          sigLower.includes("not interested") ||
+          sigLower.includes("hate") ||
+          sigLower.includes("avoid") ||
+          sigLower.includes("stop") ||
+          sigLower.includes("no longer");
+
+        if (isExplicitRejection) {
+          const matchesPhase = phaseTokens.some((token) => {
+            const words = token.split(/[\s,:/_-]+/).filter((w) => w.length > 3);
+            return words.some((w) => sigLower.includes(w));
+          });
+
+          if (matchesPhase) {
+            contradictedDimensions.push(dim);
+            return {
+              aligned: false,
+              reason: `Explicit directional rejection detected against active phase focus: "${sig}".`,
+              contradictedTargetIds: [activePhase.id],
+              contradictedDimensions,
+            };
+          }
+        }
+      }
+    }
+
+    // 3. Accumulated Activity Incompatibility (Disliked / Avoided Activities)
+    let dislikedTargetCount = 0;
+    const matchedDislikedTargets: string[] = [];
+
+    for (const act of activePhase.activities) {
+      const actKey = act.title.toLowerCase().trim();
+      const userAct = workModel.activities[actKey];
+      if (userAct && (userAct.affinity === "disliked" || userAct.affinity === "avoided")) {
+        dislikedTargetCount++;
+        matchedDislikedTargets.push(act.title);
+      }
+    }
+
+    for (const actTarget of activePhase.activityTargets) {
+      const actKey = actTarget.toLowerCase().trim();
+      const userAct = workModel.activities[actKey];
+      if (userAct && (userAct.affinity === "disliked" || userAct.affinity === "avoided")) {
+        dislikedTargetCount++;
+        matchedDislikedTargets.push(actTarget);
+      }
+    }
+
+    // Check capability targets with negative signals or contradiction
+    for (const cap of activePhase.capabilityTargets) {
+      const capKey = cap.toLowerCase().trim();
+      const userCap = workModel.capabilities[capKey];
+      if (userCap && userCap.contradictingEvidenceIds.length > 1) {
+        dislikedTargetCount++;
+        matchedDislikedTargets.push(cap);
+      }
+    }
+
+    // A single difficulty or single disliked item alone does NOT supersede.
+    // Multiple corroborated rejections/avoidances (>= 2) constitute accumulated material conflict.
+    if (dislikedTargetCount >= 2) {
+      return {
+        aligned: false,
+        reason: `Corroborated material incompatibility: multiple core phase targets are marked as disliked or avoided (${matchedDislikedTargets.join(", ")}).`,
+        contradictedTargetIds: [activePhase.id, ...matchedDislikedTargets],
+        contradictedDimensions: ["activity:disliked", "activity:avoided"],
+      };
+    }
+
+    // If activePhase.id is specifically listed in any evidence item's contradictedTargetIds
+    const allEvidenceIds = workModel.evidenceIds;
+    // (Checked at evidence engine level if applicable)
+
+    // Otherwise, phase remains aligned.
+    // Additional interests (e.g., user is also interested in AI while doing backend)
+    // or isolated difficulty statements ("Backend is difficult") do NOT trigger supersession.
+    return {
+      aligned: true,
+    };
+  }
+
+  /**
+   * Evaluates current UserWorkModel state and active phase alignment to determine:
+   * 1. phaseDisposition: "continue" | "complete" | "supersede"
+   * 2. mode: "commit" | "disambiguate" | "explore"
    */
   public evaluateNextAction(input: DecisionEngineInput): PlanningDecision {
-    const { profileId, workModel, declaredGoal, completedPhases = [], proposedQuestions = [] } = input;
+    const {
+      profileId,
+      workModel,
+      declaredGoal,
+      activePhase,
+      completedPhases = [],
+      phaseHistory,
+      proposedQuestions = [],
+      isPhaseCompletion = false,
+    } = input;
     const now = new Date().toISOString();
+    const decisionId = input.decisionId || `dec_${randomUUID()}`;
 
     const capabilities = Object.values(workModel.capabilities);
     const uncertainties = workModel.uncertainties;
@@ -51,8 +194,25 @@ export class DecisionEngine {
     // Check if user has declared a goal or if preferences point to a direction
     const goalText = declaredGoal || (preferences.domains.length > 0 ? preferences.domains[0] : null);
 
-    // 1. DISAMBIGUATE CHECK:
-    // If the goal is completely missing, or high-impact uncertainties exist that are directly answerable via question
+    // 1. Evaluate Active Phase Alignment and Disposition
+    let phaseDisposition: PhaseDisposition = "continue";
+    let alignmentReason: string | undefined;
+
+    if (activePhase) {
+      const alignment = this.evaluateActivePhaseAlignment(activePhase, workModel, goalText);
+      if (!alignment.aligned) {
+        phaseDisposition = "supersede";
+        alignmentReason = alignment.reason;
+      } else if (isPhaseCompletion) {
+        phaseDisposition = "complete";
+      } else {
+        phaseDisposition = "continue";
+      }
+    } else {
+      phaseDisposition = isPhaseCompletion ? "complete" : "continue";
+    }
+
+    // 2. DISAMBIGUATE CHECK:
     const missingCoreGoal = !goalText || goalText.trim().length === 0;
     const hasMaterialUncertainty =
       missingCoreGoal ||
@@ -64,7 +224,6 @@ export class DecisionEngine {
       candidates = this.candidateGen.generateCandidates(workModel, goalText);
     }
 
-    // Determine if candidate directions are ambiguous (multiple competing directions without clear evidence)
     const competingDirections = candidates.filter((c) => c.status === "active" || c.status === "supported");
     const isAmbiguousDirection = competingDirections.length > 1;
 
@@ -72,7 +231,6 @@ export class DecisionEngine {
     const experimentUncertainty = uncertainties.find((u) => u.resolutionStrategy === "experiment");
 
     // Case A: EXPLORE
-    // If an explicit uncertainty requires an experiment, or user is unsure
     const needsExploration =
       !!experimentUncertainty ||
       (goalText && (goalText.toLowerCase().includes("not sure") || goalText.toLowerCase().includes("open to suggestions"))) ||
@@ -93,22 +251,27 @@ export class DecisionEngine {
       };
 
       return {
-        id: `dec_${Date.now()}`,
+        id: decisionId,
         profileId,
         mode: "explore" as DecisionMode,
+        phaseDisposition,
         primaryObjective: `Gather empirical evidence through practical exploration in ${expName}`,
         targetCandidateDirection: targetCandidate?.name || null,
-        activePhase: null,
+        previousActivePhaseId: activePhase ? activePhase.id : null,
+        activePhaseId: activePhase ? activePhase.id : null,
+        createdPhaseId: null,
+        activePhase: activePhase || null,
         activeQuestion: null,
         activeExperiment: experiment,
-        rationale: `Direct questioning is insufficient to resolve uncertainty. Initiating practical exploratory probe.`,
+        rationale: alignmentReason
+          ? `${alignmentReason} Initiating practical exploratory probe to resolve subsequent direction.`
+          : `Direct questioning is insufficient to resolve uncertainty. Initiating practical exploratory probe.`,
         evidenceConsidered: workModel.evidenceIds,
         timestamp: now,
       };
     }
 
     // Case B: DISAMBIGUATE
-    // If an explicit question uncertainty exists, or goal is missing/ambiguous/uncertain
     if (
       questionUncertainty ||
       ((missingCoreGoal || isAmbiguousDirection || hasMaterialUncertainty) && proposedQuestions.length > 0)
@@ -136,16 +299,19 @@ export class DecisionEngine {
               },
             ];
 
-      // Pick highest information-value question
       const selectedQuestion = this.selectHighestValueQuestion(candidatesToConsider, workModel);
       if (selectedQuestion) {
         return {
-          id: `dec_${Date.now()}`,
+          id: decisionId,
           profileId,
           mode: "disambiguate" as DecisionMode,
+          phaseDisposition,
           primaryObjective: `Resolve uncertainty regarding ${selectedQuestion.dimension}`,
           targetCandidateDirection: candidates[0]?.name || null,
-          activePhase: null,
+          previousActivePhaseId: activePhase ? activePhase.id : null,
+          activePhaseId: activePhase ? activePhase.id : null,
+          createdPhaseId: null,
+          activePhase: activePhase || null,
           activeQuestion: {
             selectedQuestion,
             consideredCandidates: candidatesToConsider,
@@ -153,7 +319,9 @@ export class DecisionEngine {
             selectionTimestamp: now,
           },
           activeExperiment: null,
-          rationale: `Disambiguation required: ${selectedQuestion.why || "Information needed to clarify direction."}`,
+          rationale: alignmentReason
+            ? `${alignmentReason} Disambiguation question required before committing to replacement phase.`
+            : `Disambiguation required: ${selectedQuestion.why || "Information needed to clarify direction."}`,
           evidenceConsidered: workModel.evidenceIds,
           timestamp: now,
         };
@@ -161,19 +329,28 @@ export class DecisionEngine {
     }
 
     // Case C: COMMIT
-    // There is sufficient clarity to proceed with the next developmental phase
+    // Sufficient directional clarity to commit
     const chosenDirection = candidates[0]?.name || goalText || "Technical Fundamentals";
 
     return {
-      id: `dec_${Date.now()}`,
+      id: decisionId,
       profileId,
       mode: "commit" as DecisionMode,
-      primaryObjective: `Generate and execute next phase for ${chosenDirection}`,
+      phaseDisposition,
+      primaryObjective:
+        phaseDisposition === "supersede"
+          ? `Supersede misaligned active phase and commit to replacement phase for ${chosenDirection}`
+          : `Generate and execute next phase for ${chosenDirection}`,
       targetCandidateDirection: chosenDirection,
-      activePhase: null, // Will be populated by PhasePlanner
+      previousActivePhaseId: activePhase ? activePhase.id : null,
+      activePhaseId: activePhase ? activePhase.id : null,
+      createdPhaseId: null, // Populated upon phase creation
+      activePhase: activePhase || null,
       activeQuestion: null,
       activeExperiment: null,
-      rationale: `Sufficient evidence and directional clarity established to commit to next development phase.`,
+      rationale: alignmentReason
+        ? `${alignmentReason} Committing to new adaptive phase aligned with current user direction.`
+        : `Sufficient evidence and directional clarity established to commit to next development phase.`,
       evidenceConsidered: workModel.evidenceIds,
       timestamp: now,
     };
@@ -185,7 +362,6 @@ export class DecisionEngine {
   ): QuestionCandidate | null {
     if (!candidates || candidates.length === 0) return null;
 
-    // Filter out already known dimensions
     const knownDims = new Set([
       ...Object.keys(workModel.capabilities),
       ...Object.keys(workModel.workCharacteristics),
@@ -196,7 +372,6 @@ export class DecisionEngine {
     const eligible = candidates.filter((c) => !knownDims.has(c.dimension.toLowerCase()));
     if (eligible.length === 0) return candidates[0];
 
-    // Rank by utility score / information gain
     eligible.sort((a, b) => (b.utilityScore ?? b.informationGain ?? 0) - (a.utilityScore ?? a.informationGain ?? 0));
     return eligible[0];
   }

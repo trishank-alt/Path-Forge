@@ -15,10 +15,12 @@ export interface PhasePlanInput {
   directionName: string;
   workModel: UserWorkModel;
   completedPhases?: RoadmapPhase[];
+  phaseHistory?: RoadmapPhase[];
   customObjective?: string;
   curriculum?: Curriculum | PathDefinition;
   gapResults?: SkillGapAnalysisResult[];
   targetEcosystem?: TechnologyEcosystem;
+  createdByDecisionId?: string;
 }
 
 export class PhasePlanner {
@@ -41,13 +43,16 @@ export class PhasePlanner {
       directionName,
       workModel,
       completedPhases = [],
+      phaseHistory,
       customObjective,
       curriculum: targetCurriculum,
       gapResults = [],
       targetEcosystem,
+      createdByDecisionId,
     } = input;
 
-    const phaseNumber = completedPhases.length + 1;
+    const history = phaseHistory || completedPhases;
+    const phaseNumber = history.length + 1;
 
     // 1. Capacity constraints adapt phase scope and pacing
     const hoursPerWeek = Math.max(2, Math.min(60, workModel.constraints.hoursPerWeek || 8));
@@ -93,12 +98,21 @@ export class PhasePlanner {
       }
     } else {
       // Grounded decomposition for uncatalogued/novel directions
+      // Prior completed phases indicate acquired competencies
+      // Prior superseded phases indicate non-acquired/redirected context that should not be blindly repeated
+      const priorCompleted = history.filter((p) => p.status === "completed");
+      const priorSuperseded = history.filter((p) => p.status === "superseded");
+      const completedCaps = new Set(priorCompleted.flatMap((p) => p.capabilityTargets || []));
+      const supersededCaps = new Set(priorSuperseded.flatMap((p) => p.capabilityTargets || []));
+
       const decomp = this.knowledge.resolveOrDecomposeDirection(directionName);
-      const allCaps = decomp.capabilities;
-      const startIndex = (phaseNumber - 1) % allCaps.length;
-      selectedCaps = allCaps.slice(startIndex, startIndex + 2);
+      const remainingCaps = decomp.capabilities.filter((c) => !completedCaps.has(c));
+      const preferredCaps = remainingCaps.filter((c) => !supersededCaps.has(c));
+      const candidateCaps = preferredCaps.length > 0 ? preferredCaps : (remainingCaps.length > 0 ? remainingCaps : decomp.capabilities);
+
+      selectedCaps = candidateCaps.slice(0, 2);
       if (selectedCaps.length === 0) {
-        selectedCaps.push(allCaps[0] || `${directionName} Advanced Practice`);
+        selectedCaps.push(decomp.capabilities[0] || `${directionName} Advanced Practice`);
       }
       phaseTitlePrefix = `Phase ${phaseNumber}: ${selectedCaps.join(" & ")}`;
     }
@@ -257,6 +271,8 @@ export class PhasePlanner {
         weeklyHours: hoursPerWeek,
       },
       capabilityTargets: selectedCaps,
+      activityTargets: activities.map((a) => a.title),
+      characteristicTargets: ["autonomy", "pace", "technical_depth"],
       activities,
       project,
       evidenceTargets,
@@ -264,6 +280,7 @@ export class PhasePlanner {
       resources: matchedResources.slice(0, 3),
       status: "in_progress",
       explanation: `Phase ${phaseNumber} scoped specifically for ${hoursPerWeek}h/week to develop core capabilities while gathering observational evidence for subsequent planning.`,
+      createdByDecisionId,
     };
   }
 

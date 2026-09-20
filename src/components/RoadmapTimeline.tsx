@@ -197,6 +197,7 @@ export function RoadmapTimeline({
           const isInProgress = milestone.status === "in_progress";
           const isLocked = milestone.status === "locked";
           const isCompleted = milestone.status === "completed";
+          const isSuperseded = milestone.status === "superseded";
 
           return (
             <div
@@ -206,6 +207,8 @@ export function RoadmapTimeline({
                   ? "border-cyan-500/40 glow-cyan bg-slate-900/90"
                   : isCompleted
                   ? "border-emerald-500/30 bg-slate-900/60"
+                  : isSuperseded
+                  ? "border-amber-500/30 bg-slate-900/40 opacity-80"
                   : "border-slate-800/80 bg-slate-900/40 opacity-85"
               }`}
             >
@@ -221,6 +224,8 @@ export function RoadmapTimeline({
                         ? "bg-gradient-to-tr from-cyan-500 to-indigo-600 text-slate-950 font-black shadow-md glow-cyan"
                         : isCompleted
                         ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+                        : isSuperseded
+                        ? "bg-amber-500/20 text-amber-400 border border-amber-500/40"
                         : "bg-slate-800 text-slate-400 border border-slate-700"
                     }`}
                   >
@@ -229,17 +234,21 @@ export function RoadmapTimeline({
 
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-sm font-bold text-slate-100">{milestone.title}</h3>
+                      <h3 className={`text-sm font-bold ${isSuperseded ? "text-slate-300 line-through opacity-80" : "text-slate-100"}`}>
+                        {milestone.title}
+                      </h3>
                       <span
                         className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
                           isInProgress
                             ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30"
                             : isCompleted
                             ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                            : isSuperseded
+                            ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
                             : "bg-slate-800 text-slate-400 border border-slate-700"
                         }`}
                       >
-                        {isInProgress ? "In Progress" : isCompleted ? "Completed" : "Locked"}
+                        {isInProgress ? "In Progress" : isCompleted ? "Completed" : isSuperseded ? "Superseded" : "Locked"}
                       </span>
                     </div>
                     <p className="text-xs text-slate-400 mt-0.5">{milestone.description}</p>

@@ -44,9 +44,11 @@ CREATE TABLE IF NOT EXISTS decisions (
     id VARCHAR(64) PRIMARY KEY,
     profile_id VARCHAR(64) NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     mode VARCHAR(32) NOT NULL, -- commit, disambiguate, explore
+    phase_disposition VARCHAR(32) NOT NULL DEFAULT 'continue', -- continue, complete, supersede
     primary_objective TEXT NOT NULL,
     target_candidate_direction VARCHAR(255),
-    active_phase_id VARCHAR(64),
+    previous_active_phase_id VARCHAR(64),
+    created_phase_id VARCHAR(64),
     active_question JSONB,
     active_experiment JSONB,
     rationale TEXT NOT NULL,
@@ -66,13 +68,20 @@ CREATE TABLE IF NOT EXISTS phases (
     total_hours INT NOT NULL,
     weekly_hours INT NOT NULL,
     capability_targets JSONB NOT NULL DEFAULT '[]'::jsonb,
+    activity_targets JSONB NOT NULL DEFAULT '[]'::jsonb,
+    characteristic_targets JSONB NOT NULL DEFAULT '[]'::jsonb,
     activities JSONB NOT NULL DEFAULT '[]'::jsonb,
     project JSONB,
     evidence_targets JSONB NOT NULL DEFAULT '[]'::jsonb,
     decision_point JSONB NOT NULL DEFAULT '{}'::jsonb,
     resources JSONB NOT NULL DEFAULT '[]'::jsonb,
-    status VARCHAR(32) NOT NULL DEFAULT 'planned', -- planned, in_progress, completed, adapted
+    status VARCHAR(32) NOT NULL DEFAULT 'in_progress', -- in_progress, completed, superseded, planned, adapted
     explanation TEXT,
+    created_by_decision_id VARCHAR(64),
+    superseded_by_decision_id VARCHAR(64),
+    superseded_at TIMESTAMPTZ,
+    supersession_reason TEXT,
+    completed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

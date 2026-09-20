@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import {
   ConfidenceBreakdown,
   IntakeMessageRequest,
@@ -60,6 +61,7 @@ import {
   ProvenanceRepository,
   ReasoningHistory,
 } from "../persistence/repositories";
+import { PlanningTransactionCoordinator } from "../persistence/transaction-coordinator";
 import { SEEDED_PATHS, PathDefinition } from "../persistence/seed-data";
 
 export interface IntakeResponse {
@@ -285,6 +287,7 @@ export class LearningOrchestrator {
   private phaseRepo: PhaseRepository;
   private userWorkModelRepo: UserWorkModelRepository;
   private provenanceRepo: ProvenanceRepository;
+  private planningTx: PlanningTransactionCoordinator;
 
   constructor() {
     this.profileRepo = new ProfileRepository();
@@ -315,6 +318,7 @@ export class LearningOrchestrator {
     this.phaseRepo = new PhaseRepository();
     this.userWorkModelRepo = new UserWorkModelRepository();
     this.provenanceRepo = new ProvenanceRepository();
+    this.planningTx = new PlanningTransactionCoordinator(this.decisionRepo, this.phaseRepo);
   }
 
   /**
@@ -323,7 +327,11 @@ export class LearningOrchestrator {
   private phaseToMilestone(phase: RoadmapPhase, statusOverride?: MilestoneStatus): Milestone {
     const status: MilestoneStatus =
       statusOverride ||
-      (phase.status === "completed" ? "completed" : "in_progress");
+      (phase.status === "completed"
+        ? "completed"
+        : phase.status === "superseded"
+        ? "superseded"
+        : "in_progress");
 
     return {
       id: phase.id,
@@ -385,7 +393,9 @@ export class LearningOrchestrator {
       activePhase.duration?.weeklyHours || profile.constraints.hoursPerWeek || 8;
 
     const milestones: Milestone[] = [
-      ...completedPhases.map((p) => this.phaseToMilestone(p, "completed")),
+      ...completedPhases.map((p) =>
+        this.phaseToMilestone(p, p.status === "superseded" ? "superseded" : "completed")
+      ),
       this.phaseToMilestone(activePhase, "in_progress"),
     ];
 
@@ -547,31 +557,80 @@ export class LearningOrchestrator {
       profile.declaredTargetRole ||
       (profile.workModel.preferences.domains[0] || "Software Engineering");
 
-    const planningDecision = this.decisionEngine.evaluateNextAction({
+    const activePhase = await this.phaseRepo.getActivePhase(profile.id);
+    const phaseHistory = await this.phaseRepo.getPhaseHistory(profile.id);
+    const decisionId = `dec_${randomUUID()}`;
+
+    const planningDecisionProposal = this.decisionEngine.evaluateNextAction({
+      decisionId,
       profileId: profile.id,
       workModel: engineResult.updatedWorkModel,
       declaredGoal: profile.declaredTargetRole,
+      activePhase,
+      phaseHistory,
       completedPhases: profile.completedPhases || [],
     });
 
-    profile.decisions = [...(profile.decisions || []), planningDecision];
-    await this.decisionRepo.saveDecision(planningDecision);
-
     let nextPhase: RoadmapPhase | null = null;
-    if (planningDecision.mode === "commit" && !options.skipPhaseGeneration) {
+    if (
+      planningDecisionProposal.mode === "commit" &&
+      !options.skipPhaseGeneration &&
+      (planningDecisionProposal.phaseDisposition === "complete" ||
+        planningDecisionProposal.phaseDisposition === "supersede" ||
+        !activePhase)
+    ) {
       nextPhase = this.phasePlanner.generateNextPhase({
         directionName: targetDirection,
         workModel: engineResult.updatedWorkModel,
+        phaseHistory,
         completedPhases: profile.completedPhases || [],
+        createdByDecisionId: decisionId,
       });
-      profile.activePhase = nextPhase;
-      await this.phaseRepo.savePhase(profile.id, nextPhase);
     }
+
+    const finalDecision: PlanningDecision = {
+      ...planningDecisionProposal,
+      previousActivePhaseId: activePhase?.id ?? null,
+      activePhaseId: activePhase?.id ?? null,
+      createdPhaseId: nextPhase?.id ?? null,
+      activePhase:
+        nextPhase ||
+        (planningDecisionProposal.phaseDisposition === "continue" ? activePhase : null),
+    };
+
+    profile.decisions = [...(profile.decisions || []), finalDecision];
+
+    await this.planningTx.executePlanningTransition({
+      profileId: profile.id,
+      decision: finalDecision,
+      activePhaseTransition:
+        activePhase && planningDecisionProposal.phaseDisposition !== "continue"
+          ? {
+              phaseId: activePhase.id,
+              toStatus:
+                planningDecisionProposal.phaseDisposition === "supersede"
+                  ? "superseded"
+                  : "completed",
+              reason: planningDecisionProposal.rationale,
+              timestamp: finalDecision.timestamp,
+            }
+          : null,
+      newPhase: nextPhase || null,
+    });
+
+    profile.activePhase =
+      nextPhase ||
+      (planningDecisionProposal.phaseDisposition === "continue" ? activePhase : null);
+    const allPhases = await this.phaseRepo.getPhaseHistory(profile.id);
+    profile.completedPhases = allPhases.filter((p) => p.status === "completed");
+    profile.phaseHistory = allPhases;
 
     return {
       workModel: engineResult.updatedWorkModel,
-      decision: planningDecision,
-      nextPhase,
+      decision: finalDecision,
+      nextPhase:
+        nextPhase ||
+        (planningDecisionProposal.phaseDisposition === "continue" ? activePhase : null),
     };
   }
 
@@ -2512,20 +2571,11 @@ export class LearningOrchestrator {
     const profileId = submission.profileId || "demo_learner_1";
     const profile = await this.profileRepo.getProfile(profileId);
 
-    const activePhase =
-      profile.activePhase?.id === phaseId
-        ? profile.activePhase
-        : (await this.phaseRepo.getActivePhase(profileId)) || profile.activePhase;
+    const activePhase = (await this.phaseRepo.getActivePhase(profileId)) || profile.activePhase;
 
     if (!activePhase) {
       throw new Error(`No active phase found matching ID '${phaseId}' for profile '${profileId}'.`);
     }
-
-    // Mark phase completed
-    activePhase.status = "completed";
-    profile.activePhase = null;
-    profile.completedPhases = [...(profile.completedPhases || []), activePhase];
-    await this.phaseRepo.savePhase(profileId, activePhase);
 
     // Extract empirical evidence from submitted work
     const now = new Date().toISOString();
@@ -2541,6 +2591,7 @@ export class LearningOrchestrator {
       status: "active",
       provenance: {
         sourceEventId: phaseId,
+        phaseId: activePhase.id,
         originalText: submission.notes || `Completed phase deliverable: ${activePhase.objective}`,
         derivationRule: `Empirical deliverable verification for phase ${activePhase.phaseNumber}`,
       },
@@ -2561,48 +2612,87 @@ export class LearningOrchestrator {
     await this.evidenceRepo.saveEvidence(profileId, engineResult.acceptedEvidence);
     await this.userWorkModelRepo.saveWorkModel(profileId, engineResult.updatedWorkModel);
 
+    // Pre-allocate decisionId before phase generation
+    const decisionId = `dec_${randomUUID()}`;
+    const phaseHistory = await this.phaseRepo.getPhaseHistory(profileId);
+
     // Decision Engine determines next step
     const targetDirection = profile.declaredTargetRole || "Software Engineering";
-    const nextDecision = this.decisionEngine.evaluateNextAction({
+    const nextDecisionProposal = this.decisionEngine.evaluateNextAction({
+      decisionId,
       profileId,
       workModel: engineResult.updatedWorkModel,
       declaredGoal: profile.declaredTargetRole,
-      completedPhases: profile.completedPhases,
+      activePhase,
+      phaseHistory,
+      completedPhases: profile.completedPhases || [],
+      isPhaseCompletion: true,
     });
-
-    profile.decisions = [...(profile.decisions || []), nextDecision];
-    await this.decisionRepo.saveDecision(nextDecision);
 
     let nextPhase: RoadmapPhase | null = null;
     let updatedRoadmap: Roadmap | null = null;
 
-    if (nextDecision.mode === "commit") {
+    if (
+      nextDecisionProposal.mode === "commit" &&
+      (nextDecisionProposal.phaseDisposition === "complete" ||
+        nextDecisionProposal.phaseDisposition === "supersede")
+    ) {
       nextPhase = this.phasePlanner.generateNextPhase({
         directionName: targetDirection,
         workModel: engineResult.updatedWorkModel,
+        phaseHistory,
         completedPhases: profile.completedPhases || [],
+        createdByDecisionId: decisionId,
       });
-      profile.activePhase = nextPhase;
-      await this.phaseRepo.savePhase(profileId, nextPhase);
+    }
 
+    const finalDecision: PlanningDecision = {
+      ...nextDecisionProposal,
+      previousActivePhaseId: activePhase.id,
+      activePhaseId: activePhase.id,
+      createdPhaseId: nextPhase ? nextPhase.id : null,
+      activePhase: nextPhase || null,
+    };
+
+    profile.decisions = [...(profile.decisions || []), finalDecision];
+
+    // Atomically execute transition
+    await this.planningTx.executePlanningTransition({
+      profileId,
+      decision: finalDecision,
+      activePhaseTransition: {
+        phaseId: activePhase.id,
+        toStatus:
+          nextDecisionProposal.phaseDisposition === "supersede" ? "superseded" : "completed",
+        reason: nextDecisionProposal.rationale,
+        timestamp: finalDecision.timestamp,
+      },
+      newPhase: nextPhase || null,
+    });
+
+    // Refresh history
+    const updatedHistory = await this.phaseRepo.getPhaseHistory(profileId);
+    profile.completedPhases = updatedHistory.filter((p) => p.status === "completed");
+    profile.phaseHistory = updatedHistory;
+    profile.activePhase = nextPhase || null;
+    const transitionedPhase = updatedHistory.find((p) => p.id === activePhase.id) || activePhase;
+
+    if (nextPhase) {
       updatedRoadmap = this.buildRoadmapFromPhase(
         profile,
         nextPhase,
-        profile.completedPhases || [],
+        updatedHistory.filter((p) => p.id !== nextPhase!.id),
         targetDirection,
         profile.selectedPathId
       );
       await this.roadmapRepo.saveRoadmap(updatedRoadmap);
       profile.activeRoadmapId = updatedRoadmap.id;
     } else {
-      // Non-commit branch: nextDecision is DISAMBIGUATE or EXPLORE!
-      // Do NOT create Phase N+1!
-      profile.activePhase = null;
       if (profile.activeRoadmapId) {
         const currRm = await this.roadmapRepo.getRoadmap(profile.activeRoadmapId);
         if (currRm) {
-          currRm.milestones = (profile.completedPhases || []).map((p) =>
-            this.phaseToMilestone(p, "completed")
+          currRm.milestones = updatedHistory.map((p) =>
+            this.phaseToMilestone(p, p.status === "superseded" ? "superseded" : "completed")
           );
           currRm.currentPhase = null;
           await this.roadmapRepo.saveRoadmap(currRm);
@@ -2618,15 +2708,16 @@ export class LearningOrchestrator {
       eventType: "work_submitted",
       details: {
         phaseId,
-        nextDecisionMode: nextDecision.mode,
+        nextDecisionMode: finalDecision.mode,
+        phaseDisposition: finalDecision.phaseDisposition,
         nextPhaseNumber: nextPhase?.phaseNumber || null,
       },
     });
 
     return {
       profile,
-      completedPhase: activePhase,
-      nextDecision,
+      completedPhase: transitionedPhase,
+      nextDecision: finalDecision,
       nextPhase,
       roadmap: updatedRoadmap,
     };
@@ -2761,6 +2852,8 @@ export class LearningOrchestrator {
     profile: LearnerProfile;
     extractedEvidence: EvidenceItem[];
     nextDecision: PlanningDecision;
+    nextPhase: RoadmapPhase | null;
+    roadmap?: Roadmap | null;
   }> {
     const profile = await this.profileRepo.getProfile(profileId);
     const extracted = this.reflectionService.extractEvidenceFromReflection(profileId, submission);
@@ -2777,36 +2870,96 @@ export class LearningOrchestrator {
     await this.evidenceRepo.saveEvidence(profileId, engineResult.acceptedEvidence);
     await this.userWorkModelRepo.saveWorkModel(profileId, engineResult.updatedWorkModel);
 
-    const nextDecision = this.decisionEngine.evaluateNextAction({
+    const activePhase = (await this.phaseRepo.getActivePhase(profileId)) || profile.activePhase;
+    const phaseHistory = await this.phaseRepo.getPhaseHistory(profileId);
+    const decisionId = `dec_${randomUUID()}`;
+
+    const nextDecisionProposal = this.decisionEngine.evaluateNextAction({
+      decisionId,
       profileId,
       workModel: engineResult.updatedWorkModel,
       declaredGoal: profile.declaredTargetRole,
+      activePhase,
+      phaseHistory,
       completedPhases: profile.completedPhases || [],
+      isPhaseCompletion: submission.completesPhase ?? false,
     });
 
-    profile.decisions = [...(profile.decisions || []), nextDecision];
-    await this.decisionRepo.saveDecision(nextDecision);
+    let nextPhase: RoadmapPhase | null = null;
+    let updatedRoadmap: Roadmap | null = null;
+    const targetDirection = profile.declaredTargetRole || "Software Engineering";
 
-    if (nextDecision.mode === "commit") {
-      const nextPhase = this.phasePlanner.generateNextPhase({
-        directionName: profile.declaredTargetRole || "Software Engineering",
+    if (
+      nextDecisionProposal.mode === "commit" &&
+      (nextDecisionProposal.phaseDisposition === "complete" ||
+        nextDecisionProposal.phaseDisposition === "supersede")
+    ) {
+      nextPhase = this.phasePlanner.generateNextPhase({
+        directionName: targetDirection,
         workModel: engineResult.updatedWorkModel,
+        phaseHistory,
         completedPhases: profile.completedPhases || [],
+        createdByDecisionId: decisionId,
       });
-      profile.activePhase = nextPhase;
-      await this.phaseRepo.savePhase(profileId, nextPhase);
+    }
 
-      const updatedRoadmap = this.buildRoadmapFromPhase(
+    const finalDecision: PlanningDecision = {
+      ...nextDecisionProposal,
+      previousActivePhaseId: activePhase?.id ?? null,
+      activePhaseId: activePhase?.id ?? null,
+      createdPhaseId: nextPhase?.id ?? null,
+      activePhase:
+        nextPhase ||
+        (nextDecisionProposal.phaseDisposition === "continue" ? activePhase : null),
+    };
+
+    profile.decisions = [...(profile.decisions || []), finalDecision];
+
+    await this.planningTx.executePlanningTransition({
+      profileId,
+      decision: finalDecision,
+      activePhaseTransition:
+        activePhase && nextDecisionProposal.phaseDisposition !== "continue"
+          ? {
+              phaseId: activePhase.id,
+              toStatus:
+                nextDecisionProposal.phaseDisposition === "supersede"
+                  ? "superseded"
+                  : "completed",
+              reason: nextDecisionProposal.rationale,
+              timestamp: finalDecision.timestamp,
+            }
+          : null,
+      newPhase: nextPhase || null,
+    });
+
+    const updatedHistory = await this.phaseRepo.getPhaseHistory(profileId);
+    profile.completedPhases = updatedHistory.filter((p) => p.status === "completed");
+    profile.phaseHistory = updatedHistory;
+    profile.activePhase =
+      nextPhase ||
+      (nextDecisionProposal.phaseDisposition === "continue" ? activePhase : null);
+
+    if (nextPhase) {
+      updatedRoadmap = this.buildRoadmapFromPhase(
         profile,
         nextPhase,
-        profile.completedPhases || [],
-        profile.declaredTargetRole || "Software Engineering",
+        updatedHistory.filter((p) => p.id !== nextPhase!.id),
+        targetDirection,
         profile.selectedPathId
       );
       await this.roadmapRepo.saveRoadmap(updatedRoadmap);
       profile.activeRoadmapId = updatedRoadmap.id;
-    } else {
-      profile.activePhase = null;
+    } else if (profile.activeRoadmapId) {
+      const currRm = await this.roadmapRepo.getRoadmap(profile.activeRoadmapId);
+      if (currRm) {
+        currRm.milestones = updatedHistory.map((p) =>
+          this.phaseToMilestone(p, p.status === "superseded" ? "superseded" : "completed")
+        );
+        currRm.currentPhase = profile.activePhase;
+        await this.roadmapRepo.saveRoadmap(currRm);
+        updatedRoadmap = currRm;
+      }
     }
 
     await this.profileRepo.saveProfile(profile);
@@ -2814,7 +2967,9 @@ export class LearningOrchestrator {
     return {
       profile,
       extractedEvidence: extracted,
-      nextDecision,
+      nextDecision: finalDecision,
+      nextPhase,
+      roadmap: updatedRoadmap,
     };
   }
 

@@ -14,6 +14,7 @@ const SOURCE_PRECEDENCE_WEIGHTS: Record<EvidenceSource, number> = {
   assessment_evidence: 4.0,
   experiment_observation: 3.5,
   reflection: 3.5,
+  phase_reflection: 3.5,
   linked_artifact: 3.0,
   self_report: 2.0,
   llm_inference: 1.0,
