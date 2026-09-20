@@ -4,6 +4,8 @@ const SOURCE_PRECEDENCE: Record<FactSource, number> = {
   user_correction: 6,
   user_answer: 5,
   assessment_evidence: 4,
+  experiment_observation: 3.5,
+  reflection: 3.5,
   linked_artifact: 3,
   self_report: 2,
   llm_inference: 1,

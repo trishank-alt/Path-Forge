@@ -26,6 +26,11 @@ function toCurriculum(
   return catalogPathToCurriculum(target as PathDefinition, ecosystem);
 }
 
+/**
+ * @deprecated MilestonePlanner is deprecated in favor of PhasePlanner (src/lib/domain/planning/phase-planner.ts).
+ * PathForge does NOT generate 3-phase roadmaps upfront.
+ * A single planning operation generates at most one new RoadmapPhase.
+ */
 export class MilestonePlanner {
   private scorer: RecommendationScorer;
 

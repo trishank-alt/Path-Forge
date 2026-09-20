@@ -2,8 +2,10 @@ import {
   LearnerProfile,
   Roadmap,
   Scenario,
-  ProfileFact,
-  CompetencyRecord,
+  EvidenceItem,
+  PlanningDecision,
+  RoadmapPhase,
+  UserWorkModel,
 } from "../contracts";
 import { SEEDED_PATHS } from "./seed-data";
 
@@ -22,12 +24,21 @@ class InMemoryDataStore {
   public savedRoadmaps: Map<string, Roadmap[]> = new Map(); // profileId -> historical Roadmap[]
   public scenarios: Map<string, Scenario[]> = new Map(); // profileId -> Scenario[]
   public auditEvents: DecisionAuditEvent[] = [];
+  public evidence: Map<string, EvidenceItem[]> = new Map(); // profileId -> EvidenceItem[]
+  public decisions: Map<string, PlanningDecision[]> = new Map(); // profileId -> PlanningDecision[]
+  public phases: Map<string, RoadmapPhase[]> = new Map(); // profileId -> RoadmapPhase[]
+  public workModels: Map<string, UserWorkModel> = new Map(); // profileId -> UserWorkModel
 
   constructor() {
     this.createCleanProfile("demo_learner_1");
   }
 
   public createCleanProfile(profileId: string = "demo_learner_1"): LearnerProfile {
+    this.evidence.delete(profileId);
+    this.decisions.delete(profileId);
+    this.phases.delete(profileId);
+    this.workModels.delete(profileId);
+
     const numPaths = SEEDED_PATHS.length;
     const uniformPrior = Number((1.0 / numPaths).toFixed(4));
 
@@ -180,4 +191,141 @@ export class AuditRepository {
   public async getRecentEvents(limit: number = 50): Promise<DecisionAuditEvent[]> {
     return JSON.parse(JSON.stringify(dataStore.auditEvents.slice(0, limit)));
   }
+
+  public async getAuditEvents(profileId: string): Promise<DecisionAuditEvent[]> {
+    return dataStore.auditEvents.filter((e) => e.profileId === profileId);
+  }
 }
+
+// ==========================================
+// ADAPTIVE PLANNING REPOSITORIES (POSTGRESQL-ALIGNED)
+// ==========================================
+
+export class EvidenceRepository {
+  public async saveEvidence(profileId: string, items: EvidenceItem[]): Promise<void> {
+    dataStore.evidence.set(profileId, JSON.parse(JSON.stringify(items)));
+  }
+
+  public async getEvidence(profileId: string): Promise<EvidenceItem[]> {
+    const items = dataStore.evidence.get(profileId) || [];
+    return JSON.parse(JSON.stringify(items));
+  }
+}
+
+export class DecisionRepository {
+  public async saveDecision(decision: PlanningDecision): Promise<void> {
+    const list = dataStore.decisions.get(decision.profileId) || [];
+    list.push(JSON.parse(JSON.stringify(decision)));
+    dataStore.decisions.set(decision.profileId, list);
+  }
+
+  public async getDecisions(profileId: string): Promise<PlanningDecision[]> {
+    const list = dataStore.decisions.get(profileId) || [];
+    return JSON.parse(JSON.stringify(list));
+  }
+}
+
+export class PhaseRepository {
+  public async savePhase(profileId: string, phase: RoadmapPhase): Promise<void> {
+    const list = dataStore.phases.get(profileId) || [];
+    const existingIdx = list.findIndex((p) => p.id === phase.id);
+    if (existingIdx >= 0) {
+      list[existingIdx] = JSON.parse(JSON.stringify(phase));
+    } else {
+      list.push(JSON.parse(JSON.stringify(phase)));
+    }
+    dataStore.phases.set(profileId, list);
+  }
+
+  public async getPhases(profileId: string): Promise<RoadmapPhase[]> {
+    const list = dataStore.phases.get(profileId) || [];
+    return JSON.parse(JSON.stringify(list));
+  }
+
+  public async getActivePhase(profileId: string): Promise<RoadmapPhase | null> {
+    const list = dataStore.phases.get(profileId) || [];
+    const active = list.find((p) => p.status === "in_progress" || p.status === "planned");
+    return active ? JSON.parse(JSON.stringify(active)) : null;
+  }
+}
+
+export class UserWorkModelRepository {
+  public async saveWorkModel(profileId: string, model: UserWorkModel): Promise<void> {
+    dataStore.workModels.set(profileId, JSON.parse(JSON.stringify(model)));
+  }
+
+  public async getWorkModel(profileId: string): Promise<UserWorkModel | null> {
+    const model = dataStore.workModels.get(profileId);
+    return model ? JSON.parse(JSON.stringify(model)) : null;
+  }
+}
+
+export interface ReasoningHistory {
+  profileId: string;
+  evidence: EvidenceItem[];
+  decisions: PlanningDecision[];
+  phases: RoadmapPhase[];
+  reconstructedWorkModel: UserWorkModel;
+  narrative: {
+    whatWeKnew: string[];
+    whyWeBelievedIt: string[];
+    whatWeDecided: string[];
+    whatHappenedAfterward: string[];
+  };
+}
+
+export class ProvenanceRepository {
+  private evidenceRepo = new EvidenceRepository();
+  private decisionRepo = new DecisionRepository();
+  private phaseRepo = new PhaseRepository();
+
+  /**
+   * Reconstructs the full historical reasoning chain:
+   * What did we know? When did we know it? Why did we believe it?
+   * What happened afterward? How did that change the next decision?
+   */
+  public async reconstructReasoningHistory(profileId: string): Promise<ReasoningHistory> {
+    const evidence = await this.evidenceRepo.getEvidence(profileId);
+    const decisions = await this.decisionRepo.getDecisions(profileId);
+    const phases = await this.phaseRepo.getPhases(profileId);
+
+    const { UserWorkModelManager } = await import("../domain/evidence/user-work-model");
+    const reconstructedWorkModel = UserWorkModelManager.reconstructFromEvidence(evidence);
+
+    const whatWeKnew = evidence.map(
+      (e) => `[${e.timestamp}] Dimension '${e.dimension}' recorded signal: ${JSON.stringify(e.signal)} (Status: ${e.status})`
+    );
+
+    const whyWeBelievedIt = evidence.map(
+      (e) => `Dimension '${e.dimension}' derived from source '${e.source}' with confidence ${(e.confidence * 100).toFixed(0)}% and quality ${(e.quality * 100).toFixed(0)}% (Provenance: ${JSON.stringify(e.provenance || {})})`
+    );
+
+    const whatWeDecided = decisions.map(
+      (d) => `[${d.timestamp}] Mode: '${d.mode.toUpperCase()}', Objective: '${d.primaryObjective}' (Rationale: ${d.rationale})`
+    );
+
+    const whatHappenedAfterward = phases.map(
+      (p) => `Phase ${p.phaseNumber} ('${p.objective}'): Status '${p.status}', Workload: ${p.duration.totalHours}h over ${p.duration.estimatedWeeks}w`
+    );
+
+    return {
+      profileId,
+      evidence,
+      decisions,
+      phases,
+      reconstructedWorkModel,
+      narrative: {
+        whatWeKnew,
+        whyWeBelievedIt,
+        whatWeDecided,
+        whatHappenedAfterward,
+      },
+    };
+  }
+}
+
+export const evidenceRepository = new EvidenceRepository();
+export const decisionRepository = new DecisionRepository();
+export const phaseRepository = new PhaseRepository();
+export const userWorkModelRepository = new UserWorkModelRepository();
+export const provenanceRepository = new ProvenanceRepository();

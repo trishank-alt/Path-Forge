@@ -17,6 +17,11 @@ import {
   TechnologyEcosystem,
   CurriculumDiscoveryContext,
   PendingGoalChange,
+  EvidenceItem,
+  UserWorkModel,
+  PlanningDecision,
+  RoadmapPhase,
+  ReflectionSubmission,
 } from "../contracts";
 import { FactPrecedenceEngine } from "../domain/intent/fact-precedence-engine";
 import { HypothesisEngine, HypothesisUpdateResult } from "../domain/intent/hypothesis-engine";
@@ -34,11 +39,24 @@ import { CurriculumDiscoveryService, curriculumDiscoveryService } from "../domai
 import { RecommendationEngine, recommendationEngine } from "../domain/intent/recommendation-engine";
 import { semanticDimensionValidator } from "../domain/intent/semantic-dimension-validator";
 import { LlmGateway, LlmGatewayConfig } from "../llm/llm-gateway";
+import { EvidenceEngine } from "../domain/evidence/evidence-engine";
+import { UserWorkModelManager } from "../domain/evidence/user-work-model";
+import { DecisionEngine } from "../domain/decision/decision-engine";
+import { PhasePlanner } from "../domain/planning/phase-planner";
+import { ReflectionService } from "../domain/planning/reflection-service";
+import { CandidateGenerator } from "../domain/candidates/candidate-generator";
+import { DomainKnowledge } from "../domain/knowledge/domain-knowledge";
 import {
   AuditRepository,
   ProfileRepository,
   RoadmapRepository,
   ScenarioRepository,
+  EvidenceRepository,
+  DecisionRepository,
+  PhaseRepository,
+  UserWorkModelRepository,
+  ProvenanceRepository,
+  ReasoningHistory,
 } from "../persistence/repositories";
 import { SEEDED_PATHS, PathDefinition } from "../persistence/seed-data";
 
@@ -237,6 +255,19 @@ export class LearningOrchestrator {
   private curriculumDiscoveryService: CurriculumDiscoveryService;
   private recommendationEngine: RecommendationEngine;
 
+  private evidenceEngine: EvidenceEngine;
+  private candidateGenerator: CandidateGenerator;
+  private domainKnowledge: DomainKnowledge;
+  private decisionEngine: DecisionEngine;
+  private phasePlanner: PhasePlanner;
+  private reflectionService: ReflectionService;
+
+  private evidenceRepo: EvidenceRepository;
+  private decisionRepo: DecisionRepository;
+  private phaseRepo: PhaseRepository;
+  private userWorkModelRepo: UserWorkModelRepository;
+  private provenanceRepo: ProvenanceRepository;
+
   constructor() {
     this.profileRepo = new ProfileRepository();
     this.roadmapRepo = new RoadmapRepository();
@@ -254,6 +285,19 @@ export class LearningOrchestrator {
     this.llmGateway = new LlmGateway();
     this.curriculumDiscoveryService = new CurriculumDiscoveryService();
     this.recommendationEngine = new RecommendationEngine();
+
+    this.evidenceEngine = new EvidenceEngine();
+    this.candidateGenerator = new CandidateGenerator();
+    this.domainKnowledge = new DomainKnowledge();
+    this.decisionEngine = new DecisionEngine(this.candidateGenerator, this.domainKnowledge);
+    this.phasePlanner = new PhasePlanner(this.domainKnowledge);
+    this.reflectionService = new ReflectionService();
+
+    this.evidenceRepo = new EvidenceRepository();
+    this.decisionRepo = new DecisionRepository();
+    this.phaseRepo = new PhaseRepository();
+    this.userWorkModelRepo = new UserWorkModelRepository();
+    this.provenanceRepo = new ProvenanceRepository();
   }
 
   /**
@@ -320,6 +364,93 @@ export class LearningOrchestrator {
 
     profile.preferences.languages = Array.from(languages);
     profile.preferences.domains = Array.from(domains);
+  }
+
+  /**
+   * Processes incoming facts/evidence through the Evidence Engine:
+   * - Ingests and normalizes evidence with full provenance
+   * - Resolves source precedence
+   * - Preserves contradictions without silent overwrite
+   * - Updates the derived UserWorkModel strictly on relevant dimensions
+   * - Persists evidence, work model, decisions, and phases
+   * - Evaluates next action via DecisionEngine (Commit, Disambiguate, Explore)
+   */
+  public async processEvidenceAndPlan(
+    profile: LearnerProfile,
+    newFacts: ProfileFact[],
+    inputMessage?: string
+  ): Promise<{
+    workModel: UserWorkModel;
+    decision: PlanningDecision;
+    nextPhase: RoadmapPhase | null;
+  }> {
+    const now = new Date().toISOString();
+    const incomingEvidence: EvidenceItem[] = newFacts.map((f, idx) => ({
+      id: `ev_${Date.now()}_${idx}`,
+      dimension: f.dimension,
+      signal: f.normalizedValue !== undefined ? f.normalizedValue : f.rawValue,
+      confidence: f.reliability || 0.8,
+      source: (f.source as any) || "llm_inference",
+      quality: 0.85,
+      timestamp: f.createdAt || now,
+      status: "active",
+      provenance: {
+        sourceEventId: f.id,
+        originalText: f.evidence || String(f.rawValue),
+        extractedBy: f.source || "llm_inference",
+        derivationRule: `Fact ingestion on dimension '${f.dimension}'`,
+      },
+      supportedTargetIds: [],
+      contradictedTargetIds: [],
+      explanation: f.evidence,
+    }));
+
+    const existingEvidence = await this.evidenceRepo.getEvidence(profile.id);
+    const existingWorkModel = (await this.userWorkModelRepo.getWorkModel(profile.id)) || profile.workModel;
+
+    const engineResult = this.evidenceEngine.processEvidence(
+      existingEvidence,
+      incomingEvidence,
+      existingWorkModel
+    );
+
+    profile.workModel = engineResult.updatedWorkModel;
+    profile.evidenceHistory = engineResult.acceptedEvidence;
+
+    await this.evidenceRepo.saveEvidence(profile.id, engineResult.acceptedEvidence);
+    await this.userWorkModelRepo.saveWorkModel(profile.id, engineResult.updatedWorkModel);
+
+    // Evaluate Next Action using DecisionEngine
+    const targetDirection =
+      profile.declaredTargetRole ||
+      (profile.workModel.preferences.domains[0] || "Software Engineering");
+
+    const planningDecision = this.decisionEngine.evaluateNextAction({
+      profileId: profile.id,
+      workModel: engineResult.updatedWorkModel,
+      declaredGoal: profile.declaredTargetRole,
+      completedPhases: profile.completedPhases || [],
+    });
+
+    profile.decisions = [...(profile.decisions || []), planningDecision];
+    await this.decisionRepo.saveDecision(planningDecision);
+
+    let nextPhase: RoadmapPhase | null = null;
+    if (planningDecision.mode === "commit") {
+      nextPhase = this.phasePlanner.generateNextPhase({
+        directionName: targetDirection,
+        workModel: engineResult.updatedWorkModel,
+        completedPhases: profile.completedPhases || [],
+      });
+      profile.activePhase = nextPhase;
+      await this.phaseRepo.savePhase(profile.id, nextPhase);
+    }
+
+    return {
+      workModel: engineResult.updatedWorkModel,
+      decision: planningDecision,
+      nextPhase,
+    };
   }
 
   /**
@@ -865,6 +996,8 @@ export class LearningOrchestrator {
           const newGoal = validation.proposedGoal || request.message.trim();
           await this.invalidateDerivedState(profile, newGoal);
           this.syncProfilePreferencesAndConstraints(profile);
+          const goalFact = profile.facts.find((f) => f.dimension === "declared_goal" && f.status === "active");
+          if (goalFact) await this.processEvidenceAndPlan(profile, [goalFact], request.message);
 
           const compatEval = pathCompatibilityGate.evaluateIntentCompatibility(
             profile.facts.filter((f) => f.status === "active"),
@@ -1042,6 +1175,7 @@ export class LearningOrchestrator {
     const mergeResult = this.factEngine.mergeFacts(profile.facts, newFacts);
     profile.facts = mergeResult.updatedFacts;
     this.syncProfilePreferencesAndConstraints(profile);
+    await this.processEvidenceAndPlan(profile, newFacts, request.message);
 
     // 4. Preserve declaredTargetRole (learner objective)
     profile.declaredTargetRole = this.extractAndPreserveDeclaredRole(
@@ -1107,6 +1241,17 @@ export class LearningOrchestrator {
       }
       await this.roadmapRepo.saveRoadmap(generatedRoadmap);
       profile.activeRoadmapId = generatedRoadmap.id;
+
+      if (!profile.activePhase) {
+        const roleName = profile.declaredTargetRole || lockedPath?.title || "Software Engineering";
+        const wm = (await this.userWorkModelRepo.getWorkModel(profile.id)) || profile.workModel || new UserWorkModelManager().getModel();
+        profile.activePhase = this.phasePlanner.generateNextPhase({
+          directionName: roleName,
+          workModel: wm,
+          completedPhases: profile.completedPhases || [],
+        });
+        await this.phaseRepo.savePhase(profile.id, profile.activePhase);
+      }
     } else {
       profile.activeRoadmapId = null;
       generatedRoadmap = null;
@@ -1409,6 +1554,8 @@ export class LearningOrchestrator {
       const newGoal = validation.proposedGoal || rawAnswer.trim();
       await this.invalidateDerivedState(profile, newGoal);
       this.syncProfilePreferencesAndConstraints(profile);
+      const goalFact = profile.facts.find((f) => f.dimension === "declared_goal" && f.status === "active");
+      if (goalFact) await this.processEvidenceAndPlan(profile, [goalFact], rawAnswer);
 
       const compatEval = pathCompatibilityGate.evaluateIntentCompatibility(
         profile.facts.filter((f) => f.status === "active"),
@@ -1572,6 +1719,7 @@ export class LearningOrchestrator {
     const mergeResult = this.factEngine.mergeFacts(profile.facts, [answerFact]);
     profile.facts = mergeResult.updatedFacts;
     this.syncProfilePreferencesAndConstraints(profile);
+    await this.processEvidenceAndPlan(profile, [answerFact], rawAnswer);
 
     // Update constraints if hours_per_week answered
     if (dimension === "hours_per_week") {
@@ -1646,6 +1794,17 @@ export class LearningOrchestrator {
       }
       await this.roadmapRepo.saveRoadmap(generatedRoadmap);
       profile.activeRoadmapId = generatedRoadmap.id;
+
+      if (!profile.activePhase) {
+        const roleName = profile.declaredTargetRole || lockedPath?.title || "Software Engineering";
+        const wm = (await this.userWorkModelRepo.getWorkModel(profile.id)) || profile.workModel || new UserWorkModelManager().getModel();
+        profile.activePhase = this.phasePlanner.generateNextPhase({
+          directionName: roleName,
+          workModel: wm,
+          completedPhases: profile.completedPhases || [],
+        });
+        await this.phaseRepo.savePhase(profile.id, profile.activePhase);
+      }
     } else {
       profile.activeRoadmapId = null;
       generatedRoadmap = null;
@@ -1744,6 +1903,35 @@ export class LearningOrchestrator {
     const profile = await this.profileRepo.getProfile(profileId);
     profile.facts = this.factEngine.correctFact(profile.facts, factId, correction);
     this.syncProfilePreferencesAndConstraints(profile);
+    const targetFact = profile.facts.find((f) => f.id === factId);
+    const targetDim = targetFact?.dimension || factId;
+    const correctionEvidence: EvidenceItem = {
+      id: `ev_corr_${Date.now()}`,
+      dimension: targetDim,
+      signal: correction.newValue !== undefined ? correction.newValue : "revoked",
+      confidence: 1.0,
+      source: "user_correction",
+      quality: 1.0,
+      timestamp: new Date().toISOString(),
+      status: correction.revoke ? "revoked" : "active",
+      provenance: {
+        sourceEventId: factId,
+        originalText: correction.reason || "User correction",
+        derivationRule: "User explicit fact correction/revocation",
+      },
+      supportedTargetIds: [],
+      contradictedTargetIds: [],
+      explanation: correction.reason,
+    };
+    const engineResult = this.evidenceEngine.processEvidence(
+      await this.evidenceRepo.getEvidence(profile.id),
+      [correctionEvidence],
+      (await this.userWorkModelRepo.getWorkModel(profile.id)) || profile.workModel
+    );
+    profile.workModel = engineResult.updatedWorkModel;
+    profile.evidenceHistory = engineResult.acceptedEvidence;
+    await this.evidenceRepo.saveEvidence(profile.id, engineResult.acceptedEvidence);
+    await this.userWorkModelRepo.saveWorkModel(profile.id, engineResult.updatedWorkModel);
 
     profile.declaredTargetRole = this.extractAndPreserveDeclaredRole(
       profile,
@@ -2030,6 +2218,34 @@ export class LearningOrchestrator {
       profile.competencies.push(updatedRecord);
     }
 
+    const assessmentEvidence: EvidenceItem = {
+      id: `ev_assess_${Date.now()}`,
+      dimension: `capability:${skillId.toLowerCase()}`,
+      signal: passed ? "proficient" : "novice",
+      confidence: passed ? 0.95 : 0.4,
+      source: "assessment_evidence",
+      quality: 0.95,
+      timestamp: new Date().toISOString(),
+      status: "active",
+      provenance: {
+        sourceEventId: skillId,
+        originalText: notes || `Diagnostic score: ${score}% (Passed: ${passed})`,
+        derivationRule: "Diagnostic assessment score submission",
+      },
+      supportedTargetIds: [skillId],
+      contradictedTargetIds: [],
+      explanation: notes || `Diagnostic assessment score: ${score}%`,
+    };
+    const assessEngineResult = this.evidenceEngine.processEvidence(
+      await this.evidenceRepo.getEvidence(profile.id),
+      [assessmentEvidence],
+      (await this.userWorkModelRepo.getWorkModel(profile.id)) || profile.workModel
+    );
+    profile.workModel = assessEngineResult.updatedWorkModel;
+    profile.evidenceHistory = assessEngineResult.acceptedEvidence;
+    await this.evidenceRepo.saveEvidence(profile.id, assessEngineResult.acceptedEvidence);
+    await this.userWorkModelRepo.saveWorkModel(profile.id, assessEngineResult.updatedWorkModel);
+
     await this.profileRepo.saveProfile(profile);
 
     // Regenerate active roadmap if eligible
@@ -2042,6 +2258,319 @@ export class LearningOrchestrator {
     });
 
     return { profile, roadmap: updatedRoadmap };
+  }
+
+  /**
+   * Submits practical project / work deliverable for an active phase.
+   * Produces empirical demonstration evidence, updates UserWorkModel,
+   * evaluates next action via DecisionEngine, and produces next phase if committed.
+   */
+  public async submitWork(
+    phaseId: string,
+    submission: {
+      profileId?: string;
+      notes?: string;
+      deliverableUrl?: string;
+      demonstratedCapabilities?: string[];
+    } = {}
+  ): Promise<{
+    profile: LearnerProfile;
+    completedPhase: RoadmapPhase;
+    nextDecision: PlanningDecision;
+    nextPhase: RoadmapPhase | null;
+  }> {
+    const profileId = submission.profileId || "demo_learner_1";
+    const profile = await this.profileRepo.getProfile(profileId);
+
+    const activePhase =
+      profile.activePhase?.id === phaseId
+        ? profile.activePhase
+        : (await this.phaseRepo.getActivePhase(profileId)) || profile.activePhase;
+
+    if (!activePhase) {
+      throw new Error(`No active phase found matching ID '${phaseId}' for profile '${profileId}'.`);
+    }
+
+    // Mark phase completed
+    activePhase.status = "completed";
+    profile.activePhase = null;
+    profile.completedPhases = [...(profile.completedPhases || []), activePhase];
+    await this.phaseRepo.savePhase(profileId, activePhase);
+
+    // Extract empirical evidence from submitted work
+    const now = new Date().toISOString();
+    const caps = submission.demonstratedCapabilities || activePhase.capabilityTargets || [];
+    const workEvidence: EvidenceItem[] = caps.map((cap, idx) => ({
+      id: `ev_work_${Date.now()}_${idx}`,
+      dimension: cap.startsWith("capability:") ? cap : `capability:${cap.toLowerCase().replace(/\s+/g, "_")}`,
+      signal: "demonstrated",
+      confidence: 0.95,
+      source: "assessment_evidence",
+      quality: 0.9,
+      timestamp: now,
+      status: "active",
+      provenance: {
+        sourceEventId: phaseId,
+        originalText: submission.notes || `Completed phase deliverable: ${activePhase.objective}`,
+        derivationRule: `Empirical deliverable verification for phase ${activePhase.phaseNumber}`,
+      },
+      supportedTargetIds: [cap],
+      contradictedTargetIds: [],
+      explanation: `Demonstrated capability in ${cap} through completed phase deliverable.`,
+    }));
+
+    const engineResult = this.evidenceEngine.processEvidence(
+      await this.evidenceRepo.getEvidence(profileId),
+      workEvidence,
+      (await this.userWorkModelRepo.getWorkModel(profileId)) || profile.workModel
+    );
+
+    profile.workModel = engineResult.updatedWorkModel;
+    profile.evidenceHistory = engineResult.acceptedEvidence;
+
+    await this.evidenceRepo.saveEvidence(profileId, engineResult.acceptedEvidence);
+    await this.userWorkModelRepo.saveWorkModel(profileId, engineResult.updatedWorkModel);
+
+    // Decision Engine determines next step
+    const targetDirection = profile.declaredTargetRole || "Software Engineering";
+    const nextDecision = this.decisionEngine.evaluateNextAction({
+      profileId,
+      workModel: engineResult.updatedWorkModel,
+      declaredGoal: profile.declaredTargetRole,
+      completedPhases: profile.completedPhases,
+    });
+
+    profile.decisions = [...(profile.decisions || []), nextDecision];
+    await this.decisionRepo.saveDecision(nextDecision);
+
+    let nextPhase: RoadmapPhase | null = null;
+    if (nextDecision.mode === "commit") {
+      nextPhase = this.phasePlanner.generateNextPhase({
+        directionName: targetDirection,
+        workModel: engineResult.updatedWorkModel,
+        completedPhases: profile.completedPhases,
+      });
+      profile.activePhase = nextPhase;
+      await this.phaseRepo.savePhase(profileId, nextPhase);
+    }
+
+    await this.profileRepo.saveProfile(profile);
+
+    await this.auditRepo.recordEvent({
+      profileId,
+      eventType: "work_submitted",
+      details: {
+        phaseId,
+        nextDecisionMode: nextDecision.mode,
+        nextPhaseNumber: nextPhase?.phaseNumber || null,
+      },
+    });
+
+    return {
+      profile,
+      completedPhase: activePhase,
+      nextDecision,
+      nextPhase,
+    };
+  }
+
+  /**
+   * Submits observation and reflection from a practical exploratory probe.
+   * Feeds empirical signals into Evidence Engine and triggers adaptive planning.
+   */
+  public async submitExperiment(
+    experimentId: string,
+    observation: {
+      profileId?: string;
+      findings: string;
+      energyLevel?: "high" | "moderate" | "low";
+      difficulty?: "easy" | "appropriate" | "hard";
+      targetDimension?: string;
+    }
+  ): Promise<{
+    profile: LearnerProfile;
+    newEvidence: EvidenceItem[];
+    nextDecision: PlanningDecision;
+  }> {
+    const profileId = observation.profileId || "demo_learner_1";
+    const profile = await this.profileRepo.getProfile(profileId);
+    const now = new Date().toISOString();
+
+    const expEvidence: EvidenceItem[] = [
+      {
+        id: `ev_exp_${Date.now()}`,
+        dimension: observation.targetDimension || "activity:experiment_observation",
+        signal: observation.findings,
+        confidence: 0.9,
+        source: "experiment_observation",
+        quality: 0.85,
+        timestamp: now,
+        status: "active",
+        provenance: {
+          sourceEventId: experimentId,
+          originalText: observation.findings,
+          derivationRule: "Practical experiment probe observation",
+        },
+        supportedTargetIds: [],
+        contradictedTargetIds: [],
+        explanation: `Empirical observation from experiment ${experimentId}`,
+      },
+    ];
+
+    if (observation.energyLevel) {
+      expEvidence.push({
+        id: `ev_energy_${Date.now()}`,
+        dimension: "characteristic:energy_level",
+        signal: observation.energyLevel,
+        confidence: 0.85,
+        source: "experiment_observation",
+        quality: 0.8,
+        timestamp: now,
+        status: "active",
+        provenance: {
+          sourceEventId: experimentId,
+          originalText: `Reported energy level: ${observation.energyLevel}`,
+          derivationRule: "Subjective energy level measurement during experiment",
+        },
+        supportedTargetIds: [],
+        contradictedTargetIds: [],
+        explanation: `User experienced ${observation.energyLevel} energy level during exploration.`,
+      });
+    }
+
+    const engineResult = this.evidenceEngine.processEvidence(
+      await this.evidenceRepo.getEvidence(profileId),
+      expEvidence,
+      (await this.userWorkModelRepo.getWorkModel(profileId)) || profile.workModel
+    );
+
+    profile.workModel = engineResult.updatedWorkModel;
+    profile.evidenceHistory = engineResult.acceptedEvidence;
+
+    await this.evidenceRepo.saveEvidence(profileId, engineResult.acceptedEvidence);
+    await this.userWorkModelRepo.saveWorkModel(profileId, engineResult.updatedWorkModel);
+
+    const nextDecision = this.decisionEngine.evaluateNextAction({
+      profileId,
+      workModel: engineResult.updatedWorkModel,
+      declaredGoal: profile.declaredTargetRole,
+      completedPhases: profile.completedPhases || [],
+    });
+
+    profile.decisions = [...(profile.decisions || []), nextDecision];
+    await this.decisionRepo.saveDecision(nextDecision);
+
+    if (nextDecision.mode === "commit") {
+      const nextPhase = this.phasePlanner.generateNextPhase({
+        directionName: profile.declaredTargetRole || "Software Engineering",
+        workModel: engineResult.updatedWorkModel,
+        completedPhases: profile.completedPhases || [],
+      });
+      profile.activePhase = nextPhase;
+      await this.phaseRepo.savePhase(profileId, nextPhase);
+    }
+
+    await this.profileRepo.saveProfile(profile);
+
+    return {
+      profile,
+      newEvidence: expEvidence,
+      nextDecision,
+    };
+  }
+
+  /**
+   * Ingests post-work or post-experiment structured reflection.
+   * Extracts dimension-specific evidence (enjoyment, dislike, voluntary exploration, energy)
+   * with strict dimension isolation (negative signal on X never bleeds into Y).
+   */
+  public async submitReflection(
+    submission: ReflectionSubmission,
+    profileId: string = "demo_learner_1"
+  ): Promise<{
+    profile: LearnerProfile;
+    extractedEvidence: EvidenceItem[];
+    nextDecision: PlanningDecision;
+  }> {
+    const profile = await this.profileRepo.getProfile(profileId);
+    const extracted = this.reflectionService.extractEvidenceFromReflection(profileId, submission);
+
+    const engineResult = this.evidenceEngine.processEvidence(
+      await this.evidenceRepo.getEvidence(profileId),
+      extracted,
+      (await this.userWorkModelRepo.getWorkModel(profileId)) || profile.workModel
+    );
+
+    profile.workModel = engineResult.updatedWorkModel;
+    profile.evidenceHistory = engineResult.acceptedEvidence;
+
+    await this.evidenceRepo.saveEvidence(profileId, engineResult.acceptedEvidence);
+    await this.userWorkModelRepo.saveWorkModel(profileId, engineResult.updatedWorkModel);
+
+    const nextDecision = this.decisionEngine.evaluateNextAction({
+      profileId,
+      workModel: engineResult.updatedWorkModel,
+      declaredGoal: profile.declaredTargetRole,
+      completedPhases: profile.completedPhases || [],
+    });
+
+    profile.decisions = [...(profile.decisions || []), nextDecision];
+    await this.decisionRepo.saveDecision(nextDecision);
+
+    if (nextDecision.mode === "commit") {
+      const nextPhase = this.phasePlanner.generateNextPhase({
+        directionName: profile.declaredTargetRole || "Software Engineering",
+        workModel: engineResult.updatedWorkModel,
+        completedPhases: profile.completedPhases || [],
+      });
+      profile.activePhase = nextPhase;
+      await this.phaseRepo.savePhase(profileId, nextPhase);
+    }
+
+    await this.profileRepo.saveProfile(profile);
+
+    return {
+      profile,
+      extractedEvidence: extracted,
+      nextDecision,
+    };
+  }
+
+  /**
+   * Reconstructs historical reasoning and provenance chain:
+   * What did we know? When did we know it? Why did we believe it?
+   * What happened afterward? How did that change the next decision?
+   */
+  public async getReasoningHistory(profileId: string = "demo_learner_1"): Promise<ReasoningHistory> {
+    return this.provenanceRepo.reconstructReasoningHistory(profileId);
+  }
+
+  /**
+   * Reconstructs the UserWorkModel deterministically from persisted evidence history.
+   * Proves that UserWorkModel is a derived view and can always be recovered.
+   */
+  public async reconstructWorkModel(profileId: string = "demo_learner_1"): Promise<UserWorkModel> {
+    const evidence = await this.evidenceRepo.getEvidence(profileId);
+    return UserWorkModelManager.reconstructFromEvidence(evidence);
+  }
+
+  /**
+   * Explicitly generates the next single phase for a profile, adapting to available capacity.
+   */
+  public async planNextPhase(profileId: string = "demo_learner_1", customObjective?: string): Promise<RoadmapPhase> {
+    const profile = await this.profileRepo.getProfile(profileId);
+    const workModel = (await this.userWorkModelRepo.getWorkModel(profileId)) || profile.workModel || new UserWorkModelManager().getModel();
+    const directionName = profile.declaredTargetRole || (workModel.preferences?.domains?.[0] || "Software Engineering");
+    const phase = this.phasePlanner.generateNextPhase({
+      directionName,
+      workModel,
+      completedPhases: profile.completedPhases || [],
+      customObjective,
+    });
+    profile.activePhase = phase;
+    await this.phaseRepo.savePhase(profileId, phase);
+    await this.profileRepo.saveProfile(profile);
+    return phase;
   }
 
   public async getProfile(profileId: string = "demo_learner_1"): Promise<LearnerProfile> {

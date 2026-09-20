@@ -8,14 +8,51 @@ export const FactSourceSchema = z.enum([
   "user_correction",
   "user_answer",
   "assessment_evidence",
+  "experiment_observation",
+  "reflection",
   "linked_artifact",
   "self_report",
   "llm_inference",
 ]);
 export type FactSource = z.infer<typeof FactSourceSchema>;
+export const EvidenceSourceSchema = FactSourceSchema;
+export type EvidenceSource = FactSource;
 
-export const FactStatusSchema = z.enum(["active", "superseded", "revoked"]);
+export const FactStatusSchema = z.enum([
+  "active",
+  "weakening",
+  "contradicted",
+  "superseded",
+  "revoked",
+]);
 export type FactStatus = z.infer<typeof FactStatusSchema>;
+export const EvidenceStatusSchema = FactStatusSchema;
+export type EvidenceStatus = FactStatus;
+
+export const EvidenceProvenanceSchema = z.object({
+  sourceEventId: z.string().optional(),
+  originalText: z.string().optional(),
+  extractedBy: z.string().optional(),
+  priorEvidenceId: z.string().optional(),
+  derivationRule: z.string().optional(),
+});
+export type EvidenceProvenance = z.infer<typeof EvidenceProvenanceSchema>;
+
+export const EvidenceItemSchema = z.object({
+  id: z.string(),
+  dimension: z.string(),
+  signal: z.any(),
+  confidence: z.number().min(0).max(1),
+  source: EvidenceSourceSchema,
+  quality: z.number().min(0).max(1),
+  timestamp: z.string(),
+  status: EvidenceStatusSchema.default("active"),
+  provenance: EvidenceProvenanceSchema.optional(),
+  supportedTargetIds: z.array(z.string()).default([]),
+  contradictedTargetIds: z.array(z.string()).default([]),
+  explanation: z.string().optional(),
+});
+export type EvidenceItem = z.infer<typeof EvidenceItemSchema>;
 
 export const ProfileFactSchema = z.object({
   id: z.string(),
@@ -27,6 +64,7 @@ export const ProfileFactSchema = z.object({
   reliability: z.number().min(0).max(1), // 0.0 to 1.0
   impact: z.enum(["low", "medium", "high"]).default("medium"),
   status: FactStatusSchema.default("active"),
+  provenance: EvidenceProvenanceSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -541,6 +579,213 @@ export const LearnerConstraintsSchema = z.object({
 });
 export type LearnerConstraints = z.infer<typeof LearnerConstraintsSchema>;
 
+// ==========================================
+// 8.1 USER WORK MODEL & ADAPTIVE PLANNING SCHEMAS
+// ==========================================
+
+export const UserCapabilityLevelSchema = z.enum([
+  "none",
+  "novice",
+  "working",
+  "proficient",
+  "advanced",
+]);
+export type UserCapabilityLevel = z.infer<typeof UserCapabilityLevelSchema>;
+
+export const UserCapabilityStatusSchema = z.enum([
+  "demonstrated",
+  "inferred",
+  "developing",
+  "unverified",
+]);
+export type UserCapabilityStatus = z.infer<typeof UserCapabilityStatusSchema>;
+
+export const UserCapabilityStateSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  level: UserCapabilityLevelSchema.default("novice"),
+  status: UserCapabilityStatusSchema.default("inferred"),
+  confidence: z.number().min(0).max(1),
+  supportingEvidenceIds: z.array(z.string()).default([]),
+  contradictingEvidenceIds: z.array(z.string()).default([]),
+  lastAssessedAt: z.string().nullable().optional(),
+});
+export type UserCapabilityState = z.infer<typeof UserCapabilityStateSchema>;
+
+export const UserActivityAffinitySchema = z.enum([
+  "preferred",
+  "neutral",
+  "disliked",
+  "avoided",
+]);
+export type UserActivityAffinity = z.infer<typeof UserActivityAffinitySchema>;
+
+export const UserActivityStateSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  affinity: UserActivityAffinitySchema.default("neutral"),
+  engagementLevel: z.enum(["high", "moderate", "low", "unexplored"]).default("unexplored"),
+  evidenceIds: z.array(z.string()).default([]),
+});
+export type UserActivityState = z.infer<typeof UserActivityStateSchema>;
+
+export const UserCharacteristicStateSchema = z.object({
+  id: z.string(),
+  dimension: z.string(), // autonomy, ambiguity, feedback_speed, technical_depth, collaboration
+  signal: z.any(),
+  confidence: z.number().min(0).max(1),
+  evidenceIds: z.array(z.string()).default([]),
+});
+export type UserCharacteristicState = z.infer<typeof UserCharacteristicStateSchema>;
+
+export const UserUncertaintySchema = z.object({
+  id: z.string(),
+  dimension: z.string(),
+  entityId: z.string().optional(),
+  description: z.string(),
+  impact: z.enum(["low", "medium", "high"]).default("medium"),
+  resolutionStrategy: z.enum(["question", "experiment", "practical_work"]).default("question"),
+});
+export type UserUncertainty = z.infer<typeof UserUncertaintySchema>;
+
+export const UserWorkModelSchema = z.object({
+  capabilities: z.record(z.string(), UserCapabilityStateSchema).default({}),
+  activities: z.record(z.string(), UserActivityStateSchema).default({}),
+  workCharacteristics: z.record(z.string(), UserCharacteristicStateSchema).default({}),
+  preferences: LearnerPreferencesSchema.default({
+    domains: [],
+    languages: [],
+    learningModes: ["hands_on_projects", "docs"],
+    resourceBudget: "free_only",
+  }),
+  constraints: LearnerConstraintsSchema.default({
+    hoursPerWeek: 8,
+    deadlineMonths: 6,
+    timezone: "UTC",
+    safetyScopeConfirmed: false,
+  }),
+  uncertainties: z.array(UserUncertaintySchema).default([]),
+  negativeSignals: z.record(z.string(), z.array(z.string())).default({}),
+  evidenceIds: z.array(z.string()).default([]),
+  lastUpdatedAt: z.string(),
+});
+export type UserWorkModel = z.infer<typeof UserWorkModelSchema>;
+
+export const CandidateDirectionStatusSchema = z.enum([
+  "active",
+  "weakening",
+  "unexplored",
+  "supported",
+  "uncertain",
+]);
+export type CandidateDirectionStatus = z.infer<typeof CandidateDirectionStatusSchema>;
+
+export const CandidateDirectionSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: CandidateDirectionStatusSchema.default("unexplored"),
+  rationale: z.string(),
+  supportingEvidence: z.array(z.string()).default([]),
+  conflictingEvidence: z.array(z.string()).default([]),
+  unknowns: z.array(z.string()).default([]),
+  relevantCapabilities: z.array(z.string()).default([]),
+  relevantActivities: z.array(z.string()).default([]),
+  relevantWorkCharacteristics: z.array(z.string()).default([]),
+  suggestedNextExperiment: z
+    .object({
+      objective: z.string(),
+      activity: z.string(),
+      expectedEvidence: z.string(),
+    })
+    .optional(),
+});
+export type CandidateDirection = z.infer<typeof CandidateDirectionSchema>;
+
+export const DecisionModeSchema = z.enum(["commit", "disambiguate", "explore"]);
+export type DecisionMode = z.infer<typeof DecisionModeSchema>;
+
+export const ExperimentPlanSchema = z.object({
+  id: z.string(),
+  objective: z.string(),
+  hypothesis: z.string(),
+  activity: z.string(),
+  targetUncertaintyId: z.string().optional(),
+  observableMetrics: z.array(z.string()).default([]),
+  expectedEvidence: z.string(),
+  estimatedHours: z.number().default(2),
+  status: z.enum(["pending", "in_progress", "completed", "abandoned"]).default("pending"),
+});
+export type ExperimentPlan = z.infer<typeof ExperimentPlanSchema>;
+
+export const PhaseEvidenceTargetSchema = z.object({
+  dimension: z.string(),
+  expectedSignal: z.string(),
+  measurementCriteria: z.string(),
+});
+export type PhaseEvidenceTarget = z.infer<typeof PhaseEvidenceTargetSchema>;
+
+export const RoadmapPhaseSchema = z.object({
+  id: z.string(),
+  phaseNumber: z.number().int().min(1),
+  objective: z.string(),
+  duration: z.object({
+    estimatedWeeks: z.number(),
+    totalHours: z.number(),
+    weeklyHours: z.number(),
+  }),
+  capabilityTargets: z.array(z.string()),
+  activities: z.array(
+    z.object({
+      id: z.string(),
+      title: z.string(),
+      type: z.string(),
+      description: z.string(),
+      estimatedHours: z.number(),
+    })
+  ),
+  project: PracticalProjectSchema.nullable().optional(),
+  evidenceTargets: z.array(PhaseEvidenceTargetSchema).default([]),
+  decisionPoint: z.object({
+    condition: z.string(),
+    possibleOutcomes: z.array(z.string()),
+  }),
+  resources: z.array(LearningResourceSchema).default([]),
+  status: z.enum(["planned", "in_progress", "completed", "adapted"]).default("planned"),
+  explanation: z.string().optional(),
+});
+export type RoadmapPhase = z.infer<typeof RoadmapPhaseSchema>;
+
+export const PlanningDecisionSchema = z.object({
+  id: z.string(),
+  profileId: z.string(),
+  mode: DecisionModeSchema,
+  primaryObjective: z.string(),
+  targetCandidateDirection: z.string().nullable().optional(),
+  activePhase: RoadmapPhaseSchema.nullable().optional(),
+  activeQuestion: QuestionDecisionSchema.nullable().optional(),
+  activeExperiment: ExperimentPlanSchema.nullable().optional(),
+  rationale: z.string(),
+  evidenceConsidered: z.array(z.string()).default([]),
+  timestamp: z.string(),
+});
+export type PlanningDecision = z.infer<typeof PlanningDecisionSchema>;
+
+export const ReflectionSubmissionSchema = z.object({
+  phaseId: z.string().optional(),
+  experimentId: z.string().optional(),
+  enjoyed: z.string().optional(),
+  disliked: z.string().optional(),
+  voluntarilyExplored: z.string().optional(),
+  energizing: z.string().optional(),
+  exhausting: z.string().optional(),
+  difficult: z.string().optional(),
+  deeperUnderstanding: z.string().optional(),
+  attemptHarder: z.boolean().optional(),
+  preferNext: z.string().optional(),
+  freeText: z.string().optional(),
+});
+export type ReflectionSubmission = z.infer<typeof ReflectionSubmissionSchema>;
+
 export const LearnerProfileSchema = z.object({
   id: z.string(),
   userId: z.string(),
@@ -555,6 +800,12 @@ export const LearnerProfileSchema = z.object({
   intent: IntentStateSchema,
   competencies: z.array(CompetencyRecordSchema),
   activeRoadmapId: z.string().nullable(),
+  workModel: UserWorkModelSchema.optional(),
+  evidenceHistory: z.array(EvidenceItemSchema).optional(),
+  activePhase: RoadmapPhaseSchema.nullable().optional(),
+  completedPhases: z.array(RoadmapPhaseSchema).optional(),
+  decisions: z.array(PlanningDecisionSchema).optional(),
+  candidateDirections: z.array(CandidateDirectionSchema).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
