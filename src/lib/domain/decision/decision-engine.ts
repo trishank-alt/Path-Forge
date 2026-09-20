@@ -68,37 +68,13 @@ export class DecisionEngine {
     const competingDirections = candidates.filter((c) => c.status === "active" || c.status === "supported");
     const isAmbiguousDirection = competingDirections.length > 1;
 
-    // Decision Logic:
-    // Case A: High uncertainty that can be answered quickly with a question (and we haven't asked questions excessively)
-    if ((missingCoreGoal || isAmbiguousDirection || hasMaterialUncertainty) && proposedQuestions.length > 0) {
-      // Pick highest information-value question
-      const selectedQuestion = this.selectHighestValueQuestion(proposedQuestions, workModel);
-      if (selectedQuestion) {
-        return {
-          id: `dec_${Date.now()}`,
-          profileId,
-          mode: "disambiguate" as DecisionMode,
-          primaryObjective: `Resolve uncertainty regarding ${selectedQuestion.dimension}`,
-          targetCandidateDirection: candidates[0]?.name || null,
-          activePhase: null,
-          activeQuestion: {
-            selectedQuestion,
-            consideredCandidates: proposedQuestions,
-            decisionRationale: `Question selected to resolve high-impact ambiguity in ${selectedQuestion.dimension}`,
-            selectionTimestamp: now,
-          },
-          activeExperiment: null,
-          rationale: `Disambiguation required: ${selectedQuestion.why || "Information needed to clarify direction."}`,
-          evidenceConsidered: workModel.evidenceIds,
-          timestamp: now,
-        };
-      }
-    }
+    const questionUncertainty = uncertainties.find((u) => u.resolutionStrategy === "question");
+    const experimentUncertainty = uncertainties.find((u) => u.resolutionStrategy === "experiment");
 
-    // Case B: EXPLORE
-    // If user is unsure, or an explicit uncertainty exists where an activity/experiment is more informative than a question
+    // Case A: EXPLORE
+    // If an explicit uncertainty requires an experiment, or user is unsure
     const needsExploration =
-      uncertainties.some((u) => u.resolutionStrategy === "experiment") ||
+      !!experimentUncertainty ||
       (goalText && (goalText.toLowerCase().includes("not sure") || goalText.toLowerCase().includes("open to suggestions"))) ||
       (competingDirections.length > 1 && uncertainties.some((u) => u.impact === "high"));
 
@@ -129,6 +105,59 @@ export class DecisionEngine {
         evidenceConsidered: workModel.evidenceIds,
         timestamp: now,
       };
+    }
+
+    // Case B: DISAMBIGUATE
+    // If an explicit question uncertainty exists, or goal is missing/ambiguous/uncertain
+    if (
+      questionUncertainty ||
+      ((missingCoreGoal || isAmbiguousDirection || hasMaterialUncertainty) && proposedQuestions.length > 0)
+    ) {
+      const candidatesToConsider =
+        proposedQuestions.length > 0
+          ? proposedQuestions
+          : [
+              {
+                id: `q_disambiguate_${Date.now()}`,
+                dimension:
+                  questionUncertainty?.dimension ||
+                  (missingCoreGoal ? "target_role" : "specialization_focus"),
+                question: questionUncertainty
+                  ? `Could you clarify your preference regarding ${questionUncertainty.dimension}?`
+                  : missingCoreGoal
+                  ? "What career direction or role would you like to target for your next phase?"
+                  : "Which specialization focus or technical area would you like to target next?",
+                answerType: "free_text" as const,
+                why:
+                  questionUncertainty?.description ||
+                  "Directional clarification required to scope next phase.",
+                utilityScore: 0.95,
+                informationGain: 0.95,
+              },
+            ];
+
+      // Pick highest information-value question
+      const selectedQuestion = this.selectHighestValueQuestion(candidatesToConsider, workModel);
+      if (selectedQuestion) {
+        return {
+          id: `dec_${Date.now()}`,
+          profileId,
+          mode: "disambiguate" as DecisionMode,
+          primaryObjective: `Resolve uncertainty regarding ${selectedQuestion.dimension}`,
+          targetCandidateDirection: candidates[0]?.name || null,
+          activePhase: null,
+          activeQuestion: {
+            selectedQuestion,
+            consideredCandidates: candidatesToConsider,
+            decisionRationale: `Question selected to resolve high-impact ambiguity in ${selectedQuestion.dimension}`,
+            selectionTimestamp: now,
+          },
+          activeExperiment: null,
+          rationale: `Disambiguation required: ${selectedQuestion.why || "Information needed to clarify direction."}`,
+          evidenceConsidered: workModel.evidenceIds,
+          timestamp: now,
+        };
+      }
     }
 
     // Case C: COMMIT

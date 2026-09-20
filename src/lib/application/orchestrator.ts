@@ -22,6 +22,9 @@ import {
   PlanningDecision,
   RoadmapPhase,
   ReflectionSubmission,
+  Milestone,
+  MilestoneStatus,
+  CurriculumSource,
 } from "../contracts";
 import { FactPrecedenceEngine } from "../domain/intent/fact-precedence-engine";
 import { HypothesisEngine, HypothesisUpdateResult } from "../domain/intent/hypothesis-engine";
@@ -29,7 +32,6 @@ import { IntentConfidenceService } from "../domain/intent/confidence-service";
 import { QuestionSelector } from "../domain/intent/question-selector";
 import { SkillGraph } from "../domain/learning/skill-graph";
 import { SkillGapService, SkillGapAnalysisResult } from "../domain/learning/skill-gap-service";
-import { MilestonePlanner } from "../domain/learning/milestone-planner";
 import { NextBestActionService } from "../domain/learning/next-best-action-service";
 import { resolveLearnerTechnologyContext } from "../domain/learning/technology-ecosystem";
 import { pathCompatibilityGate, IntentCompatibilityEvaluation, isNonCommittalAnswer } from "../domain/intent/path-compatibility-gate";
@@ -235,6 +237,23 @@ export function assertGlobalInvariants(
       );
     }
   }
+
+  // 11. Single newly generated phase invariant:
+  // No unearned future phases: only active phase + completed historical phases may exist.
+  if (roadmap !== null) {
+    const inProgressPhases = roadmap.milestones.filter((m) => m.status === "in_progress");
+    if (inProgressPhases.length > 1) {
+      throw new Error(
+        `[INVARIANT VIOLATION] Roadmap cannot have more than 1 in_progress phase, found: ${inProgressPhases.length}`
+      );
+    }
+    const lockedPhases = roadmap.milestones.filter((m) => m.status === "locked");
+    if (lockedPhases.length > 0) {
+      throw new Error(
+        `[INVARIANT VIOLATION] Future locked phases cannot be generated upfront, found: ${lockedPhases.length}`
+      );
+    }
+  }
 }
 
 export class LearningOrchestrator {
@@ -249,7 +268,6 @@ export class LearningOrchestrator {
   private questionSelector: QuestionSelector;
   private skillGraph: SkillGraph;
   private skillGapService: SkillGapService;
-  private milestonePlanner: MilestonePlanner;
   private nbaService: NextBestActionService;
   private llmGateway: LlmGateway;
   private curriculumDiscoveryService: CurriculumDiscoveryService;
@@ -280,7 +298,6 @@ export class LearningOrchestrator {
     this.questionSelector = new QuestionSelector(this.hypothesisEngine);
     this.skillGraph = new SkillGraph();
     this.skillGapService = new SkillGapService(this.skillGraph);
-    this.milestonePlanner = new MilestonePlanner();
     this.nbaService = new NextBestActionService();
     this.llmGateway = new LlmGateway();
     this.curriculumDiscoveryService = new CurriculumDiscoveryService();
@@ -298,6 +315,110 @@ export class LearningOrchestrator {
     this.phaseRepo = new PhaseRepository();
     this.userWorkModelRepo = new UserWorkModelRepository();
     this.provenanceRepo = new ProvenanceRepository();
+  }
+
+  /**
+   * Adapts a RoadmapPhase into the Milestone contract for API and UI rendering.
+   */
+  private phaseToMilestone(phase: RoadmapPhase, statusOverride?: MilestoneStatus): Milestone {
+    const status: MilestoneStatus =
+      statusOverride ||
+      (phase.status === "completed" ? "completed" : "in_progress");
+
+    return {
+      id: phase.id,
+      order: phase.phaseNumber,
+      title: phase.objective.startsWith("Phase")
+        ? phase.objective
+        : `Phase ${phase.phaseNumber}: ${phase.objective}`,
+      description: phase.explanation || phase.objective,
+      estimatedHours: phase.duration?.totalHours || 24,
+      estimatedWeeks: phase.duration?.estimatedWeeks || 3,
+      status,
+      skillIds: phase.capabilityTargets || [],
+      prerequisiteSkillIds: [],
+      resources: phase.resources || [],
+      project: phase.project || null,
+      completionCriteria: (phase.evidenceTargets || []).map(
+        (et) => `${et.dimension}: ${et.expectedSignal}`
+      ),
+      isDiagnosticRequired: false,
+      explanation: phase.explanation || phase.objective,
+    };
+  }
+
+  /**
+   * Authoritative single-phase roadmap builder.
+   * Packages the newly generated RoadmapPhase into the Roadmap envelope.
+   *
+   * Crucial architectural invariant:
+   * - A single planning operation creates at most ONE new phase.
+   * - milestones contains:
+   *     [...completedPhases.map(phaseToMilestone('completed')), phaseToMilestone(activePhase, 'in_progress')]
+   * - Fresh roadmap: milestones.length === 1 (Phase 1).
+   * - After completing Phase 1 + COMMIT: milestones.length === 2 (Phase 1 completed, Phase 2 in_progress).
+   * - Future unearned phases NEVER exist in persistence or response.
+   */
+  private buildRoadmapFromPhase(
+    profile: LearnerProfile,
+    activePhase: RoadmapPhase,
+    completedPhases: RoadmapPhase[],
+    pathTitle: string,
+    pathId: string | null,
+    curriculumId?: string | null,
+    curriculumSource?: CurriculumSource | null,
+    warnings: string[] = [],
+    assumptions: string[] = []
+  ): Roadmap {
+    const now = new Date().toISOString();
+    const allPhases = [...completedPhases, activePhase];
+    const totalHours = allPhases.reduce(
+      (acc, p) => acc + (p.duration?.totalHours || 0),
+      0
+    );
+    const totalWeeks = Number(
+      allPhases
+        .reduce((acc, p) => acc + (p.duration?.estimatedWeeks || 0), 0)
+        .toFixed(1)
+    );
+    const weeklyPace =
+      activePhase.duration?.weeklyHours || profile.constraints.hoursPerWeek || 8;
+
+    const milestones: Milestone[] = [
+      ...completedPhases.map((p) => this.phaseToMilestone(p, "completed")),
+      this.phaseToMilestone(activePhase, "in_progress"),
+    ];
+
+    const roadmap: Roadmap = {
+      id: `roadmap_phase_${activePhase.id}_${Date.now()}`,
+      version: completedPhases.length + 1,
+      profileId: profile.id,
+      targetPathId: pathId,
+      targetPathTitle: pathTitle,
+      curriculumId: curriculumId || null,
+      curriculumSource: curriculumSource || null,
+      createdAt: now,
+      updatedAt: now,
+      isStale: false,
+      totalEstimatedHours: totalHours,
+      totalEstimatedWeeks: totalWeeks,
+      weeklyPaceHours: weeklyPace,
+      milestones,
+      currentPhase: activePhase,
+      completedPhases,
+      nextBestAction: null,
+      assumptions:
+        assumptions.length > 0
+          ? assumptions
+          : [
+              `Phase ${activePhase.phaseNumber} is planned based on current evidence at ${weeklyPace}h/week.`,
+              "Subsequent phases will emerge adaptively from demonstrated work and reflection.",
+            ],
+      warnings,
+    };
+
+    roadmap.nextBestAction = this.nbaService.selectNextBestAction(roadmap);
+    return roadmap;
   }
 
   /**
@@ -378,7 +499,8 @@ export class LearningOrchestrator {
   public async processEvidenceAndPlan(
     profile: LearnerProfile,
     newFacts: ProfileFact[],
-    inputMessage?: string
+    inputMessage?: string,
+    options: { skipPhaseGeneration?: boolean } = {}
   ): Promise<{
     workModel: UserWorkModel;
     decision: PlanningDecision;
@@ -436,7 +558,7 @@ export class LearningOrchestrator {
     await this.decisionRepo.saveDecision(planningDecision);
 
     let nextPhase: RoadmapPhase | null = null;
-    if (planningDecision.mode === "commit") {
+    if (planningDecision.mode === "commit" && !options.skipPhaseGeneration) {
       nextPhase = this.phasePlanner.generateNextPhase({
         directionName: targetDirection,
         workModel: engineResult.updatedWorkModel,
@@ -617,10 +739,9 @@ export class LearningOrchestrator {
         { skills: curriculum.skills, edges: curriculum.edges }
       );
 
-      const requiredHours = this.milestonePlanner.calculateRequiredHours(
+      const requiredHours = this.phasePlanner.calculateRequiredHours(
         curriculum,
-        gapResults,
-        targetEcosystem
+        gapResults
       );
 
       const feasibility = feasibilityEvaluator.evaluate({
@@ -807,10 +928,9 @@ export class LearningOrchestrator {
       { skills: constructedCurriculum.skills, edges: constructedCurriculum.edges }
     );
 
-    const requiredHours = this.milestonePlanner.calculateRequiredHours(
+    const requiredHours = this.phasePlanner.calculateRequiredHours(
       constructedCurriculum,
-      gapResults,
-      targetEcosystem
+      gapResults
     );
 
     const feasibility = feasibilityEvaluator.evaluate({
@@ -1032,15 +1152,31 @@ export class LearningOrchestrator {
 
           let generatedRoadmap: Roadmap | null = null;
           if (decision.eligibility === "eligible" && curriculum) {
-            generatedRoadmap = this.milestonePlanner.planMilestones(
+            const roleName = profile.declaredTargetRole || lockedPath?.title || "Software Engineering";
+            const wm =
+              (await this.userWorkModelRepo.getWorkModel(profile.id)) ||
+              profile.workModel ||
+              new UserWorkModelManager().getModel();
+            const activePhase = this.phasePlanner.generateNextPhase({
+              directionName: roleName,
+              workModel: wm,
+              completedPhases: profile.completedPhases || [],
               curriculum,
               gapResults,
-              profile.preferences,
-              profile.constraints,
-              profile.id,
-              targetEcosystem
+              targetEcosystem,
+            });
+            profile.activePhase = activePhase;
+            await this.phaseRepo.savePhase(profile.id, activePhase);
+
+            generatedRoadmap = this.buildRoadmapFromPhase(
+              profile,
+              activePhase,
+              profile.completedPhases || [],
+              lockedPath?.title || roleName,
+              decision.selectedPathId,
+              decision.curriculumId,
+              decision.curriculumSource
             );
-            generatedRoadmap.nextBestAction = this.nbaService.selectNextBestAction(generatedRoadmap);
             await this.roadmapRepo.saveRoadmap(generatedRoadmap);
             profile.activeRoadmapId = generatedRoadmap.id;
           } else {
@@ -1175,7 +1311,7 @@ export class LearningOrchestrator {
     const mergeResult = this.factEngine.mergeFacts(profile.facts, newFacts);
     profile.facts = mergeResult.updatedFacts;
     this.syncProfilePreferencesAndConstraints(profile);
-    await this.processEvidenceAndPlan(profile, newFacts, request.message);
+    await this.processEvidenceAndPlan(profile, newFacts, request.message, { skipPhaseGeneration: true });
 
     // 4. Preserve declaredTargetRole (learner objective)
     profile.declaredTargetRole = this.extractAndPreserveDeclaredRole(
@@ -1221,37 +1357,41 @@ export class LearningOrchestrator {
     profile.curriculumId = decision.curriculumId;
     profile.curriculumSource = decision.curriculumSource;
 
-    // 9. Single Authoritative Roadmap Construction
     let generatedRoadmap: Roadmap | null = null;
     if (decision.eligibility === "eligible" && curriculum) {
-      generatedRoadmap = this.milestonePlanner.planMilestones(
+      const roleName = profile.declaredTargetRole || lockedPath?.title || "Software Engineering";
+      const wm =
+        (await this.userWorkModelRepo.getWorkModel(profile.id)) ||
+        profile.workModel ||
+        new UserWorkModelManager().getModel();
+      const activePhase = this.phasePlanner.generateNextPhase({
+        directionName: roleName,
+        workModel: wm,
+        completedPhases: profile.completedPhases || [],
         curriculum,
         gapResults,
-        profile.preferences,
-        profile.constraints,
-        profile.id,
-        targetEcosystem
-      );
-      generatedRoadmap.nextBestAction = this.nbaService.selectNextBestAction(generatedRoadmap);
+        targetEcosystem,
+      });
+      profile.activePhase = activePhase;
+      await this.phaseRepo.savePhase(profile.id, activePhase);
+
+      const warnings: string[] = [];
       if (decision.feasibility?.status === "strained") {
-        generatedRoadmap.warnings = [
-          ...generatedRoadmap.warnings,
-          `Workload is strained: ${decision.feasibility.explanation}`,
-        ];
+        warnings.push(`Workload is strained: ${decision.feasibility.explanation}`);
       }
+
+      generatedRoadmap = this.buildRoadmapFromPhase(
+        profile,
+        activePhase,
+        profile.completedPhases || [],
+        lockedPath?.title || roleName,
+        decision.selectedPathId,
+        decision.curriculumId,
+        decision.curriculumSource,
+        warnings
+      );
       await this.roadmapRepo.saveRoadmap(generatedRoadmap);
       profile.activeRoadmapId = generatedRoadmap.id;
-
-      if (!profile.activePhase) {
-        const roleName = profile.declaredTargetRole || lockedPath?.title || "Software Engineering";
-        const wm = (await this.userWorkModelRepo.getWorkModel(profile.id)) || profile.workModel || new UserWorkModelManager().getModel();
-        profile.activePhase = this.phasePlanner.generateNextPhase({
-          directionName: roleName,
-          workModel: wm,
-          completedPhases: profile.completedPhases || [],
-        });
-        await this.phaseRepo.savePhase(profile.id, profile.activePhase);
-      }
     } else {
       profile.activeRoadmapId = null;
       generatedRoadmap = null;
@@ -1441,15 +1581,31 @@ export class LearningOrchestrator {
 
         let generatedRoadmap: Roadmap | null = null;
         if (decision.eligibility === "eligible" && curriculum) {
-          generatedRoadmap = this.milestonePlanner.planMilestones(
+          const roleName = profile.declaredTargetRole || lockedPath?.title || "Software Engineering";
+          const wm =
+            (await this.userWorkModelRepo.getWorkModel(profile.id)) ||
+            profile.workModel ||
+            new UserWorkModelManager().getModel();
+          const activePhase = this.phasePlanner.generateNextPhase({
+            directionName: roleName,
+            workModel: wm,
+            completedPhases: profile.completedPhases || [],
             curriculum,
             gapResults,
-            profile.preferences,
-            profile.constraints,
-            profile.id,
-            targetEcosystem
+            targetEcosystem,
+          });
+          profile.activePhase = activePhase;
+          await this.phaseRepo.savePhase(profile.id, activePhase);
+
+          generatedRoadmap = this.buildRoadmapFromPhase(
+            profile,
+            activePhase,
+            profile.completedPhases || [],
+            lockedPath?.title || roleName,
+            decision.selectedPathId,
+            decision.curriculumId,
+            decision.curriculumSource
           );
-          generatedRoadmap.nextBestAction = this.nbaService.selectNextBestAction(generatedRoadmap);
           await this.roadmapRepo.saveRoadmap(generatedRoadmap);
           profile.activeRoadmapId = generatedRoadmap.id;
         } else {
@@ -1508,15 +1664,31 @@ export class LearningOrchestrator {
 
         let generatedRoadmap: Roadmap | null = null;
         if (decision.eligibility === "eligible" && curriculum) {
-          generatedRoadmap = this.milestonePlanner.planMilestones(
+          const roleName = profile.declaredTargetRole || lockedPath?.title || "Software Engineering";
+          const wm =
+            (await this.userWorkModelRepo.getWorkModel(profile.id)) ||
+            profile.workModel ||
+            new UserWorkModelManager().getModel();
+          const activePhase = this.phasePlanner.generateNextPhase({
+            directionName: roleName,
+            workModel: wm,
+            completedPhases: profile.completedPhases || [],
             curriculum,
             gapResults,
-            profile.preferences,
-            profile.constraints,
-            profile.id,
-            targetEcosystem
+            targetEcosystem,
+          });
+          profile.activePhase = activePhase;
+          await this.phaseRepo.savePhase(profile.id, activePhase);
+
+          generatedRoadmap = this.buildRoadmapFromPhase(
+            profile,
+            activePhase,
+            profile.completedPhases || [],
+            lockedPath?.title || roleName,
+            decision.selectedPathId,
+            decision.curriculumId,
+            decision.curriculumSource
           );
-          generatedRoadmap.nextBestAction = this.nbaService.selectNextBestAction(generatedRoadmap);
           await this.roadmapRepo.saveRoadmap(generatedRoadmap);
           profile.activeRoadmapId = generatedRoadmap.id;
         } else {
@@ -1590,15 +1762,31 @@ export class LearningOrchestrator {
 
       let generatedRoadmap: Roadmap | null = null;
       if (decision.eligibility === "eligible" && curriculum) {
-        generatedRoadmap = this.milestonePlanner.planMilestones(
+        const roleName = profile.declaredTargetRole || lockedPath?.title || "Software Engineering";
+        const wm =
+          (await this.userWorkModelRepo.getWorkModel(profile.id)) ||
+          profile.workModel ||
+          new UserWorkModelManager().getModel();
+        const activePhase = this.phasePlanner.generateNextPhase({
+          directionName: roleName,
+          workModel: wm,
+          completedPhases: profile.completedPhases || [],
           curriculum,
           gapResults,
-          profile.preferences,
-          profile.constraints,
-          profile.id,
-          targetEcosystem
+          targetEcosystem,
+        });
+        profile.activePhase = activePhase;
+        await this.phaseRepo.savePhase(profile.id, activePhase);
+
+        generatedRoadmap = this.buildRoadmapFromPhase(
+          profile,
+          activePhase,
+          profile.completedPhases || [],
+          lockedPath?.title || roleName,
+          decision.selectedPathId,
+          decision.curriculumId,
+          decision.curriculumSource
         );
-        generatedRoadmap.nextBestAction = this.nbaService.selectNextBestAction(generatedRoadmap);
         await this.roadmapRepo.saveRoadmap(generatedRoadmap);
         profile.activeRoadmapId = generatedRoadmap.id;
       } else {
@@ -1777,34 +1965,39 @@ export class LearningOrchestrator {
 
     let generatedRoadmap: Roadmap | null = null;
     if (decision.eligibility === "eligible" && curriculum) {
-      generatedRoadmap = this.milestonePlanner.planMilestones(
+      const roleName = profile.declaredTargetRole || lockedPath?.title || "Software Engineering";
+      const wm =
+        (await this.userWorkModelRepo.getWorkModel(profile.id)) ||
+        profile.workModel ||
+        new UserWorkModelManager().getModel();
+      const activePhase = this.phasePlanner.generateNextPhase({
+        directionName: roleName,
+        workModel: wm,
+        completedPhases: profile.completedPhases || [],
         curriculum,
         gapResults,
-        profile.preferences,
-        profile.constraints,
-        profile.id,
-        targetEcosystem
-      );
-      generatedRoadmap.nextBestAction = this.nbaService.selectNextBestAction(generatedRoadmap);
+        targetEcosystem,
+      });
+      profile.activePhase = activePhase;
+      await this.phaseRepo.savePhase(profile.id, activePhase);
+
+      const warnings: string[] = [];
       if (decision.feasibility?.status === "strained") {
-        generatedRoadmap.warnings = [
-          ...generatedRoadmap.warnings,
-          `Workload is strained: ${decision.feasibility.explanation}`,
-        ];
+        warnings.push(`Workload is strained: ${decision.feasibility.explanation}`);
       }
+
+      generatedRoadmap = this.buildRoadmapFromPhase(
+        profile,
+        activePhase,
+        profile.completedPhases || [],
+        lockedPath?.title || roleName,
+        decision.selectedPathId,
+        decision.curriculumId,
+        decision.curriculumSource,
+        warnings
+      );
       await this.roadmapRepo.saveRoadmap(generatedRoadmap);
       profile.activeRoadmapId = generatedRoadmap.id;
-
-      if (!profile.activePhase) {
-        const roleName = profile.declaredTargetRole || lockedPath?.title || "Software Engineering";
-        const wm = (await this.userWorkModelRepo.getWorkModel(profile.id)) || profile.workModel || new UserWorkModelManager().getModel();
-        profile.activePhase = this.phasePlanner.generateNextPhase({
-          directionName: roleName,
-          workModel: wm,
-          completedPhases: profile.completedPhases || [],
-        });
-        await this.phaseRepo.savePhase(profile.id, profile.activePhase);
-      }
     } else {
       profile.activeRoadmapId = null;
       generatedRoadmap = null;
@@ -2030,22 +2223,37 @@ export class LearningOrchestrator {
       );
     }
 
-    const roadmap = this.milestonePlanner.planMilestones(
+    const roleName = profile.declaredTargetRole || lockedPath?.title || "Software Engineering";
+    const wm =
+      (await this.userWorkModelRepo.getWorkModel(profile.id)) ||
+      profile.workModel ||
+      new UserWorkModelManager().getModel();
+    const activePhase = this.phasePlanner.generateNextPhase({
+      directionName: roleName,
+      workModel: wm,
+      completedPhases: profile.completedPhases || [],
       curriculum,
       gapResults,
-      profile.preferences,
-      profile.constraints,
-      profile.id,
-      targetEcosystem
-    );
+      targetEcosystem,
+    });
+    profile.activePhase = activePhase;
+    await this.phaseRepo.savePhase(profile.id, activePhase);
 
-    roadmap.nextBestAction = this.nbaService.selectNextBestAction(roadmap);
+    const warnings: string[] = [];
     if (decision.feasibility?.status === "strained") {
-      roadmap.warnings = [
-        ...roadmap.warnings,
-        `Workload is strained: ${decision.feasibility.explanation}`,
-      ];
+      warnings.push(`Workload is strained: ${decision.feasibility.explanation}`);
     }
+
+    const roadmap = this.buildRoadmapFromPhase(
+      profile,
+      activePhase,
+      profile.completedPhases || [],
+      lockedPath?.title || roleName,
+      decision.selectedPathId,
+      decision.curriculumId,
+      decision.curriculumSource,
+      warnings
+    );
 
     await this.roadmapRepo.saveRoadmap(roadmap);
     profile.activeRoadmapId = roadmap.id;
@@ -2134,16 +2342,37 @@ export class LearningOrchestrator {
       targetEcosystem
     );
 
-    const computedRoadmap = this.milestonePlanner.planMilestones(
-      pathDef,
-      gapResults,
-      profile.preferences,
-      effectiveConstraints,
-      profile.id,
-      targetEcosystem
-    );
+    const wm =
+      (await this.userWorkModelRepo.getWorkModel(profile.id)) ||
+      profile.workModel ||
+      new UserWorkModelManager().getModel();
+    const simWorkModel = {
+      ...wm,
+      constraints: {
+        ...wm.constraints,
+        hoursPerWeek: effectiveConstraints.hoursPerWeek,
+        deadlineMonths: effectiveConstraints.deadlineMonths,
+      },
+    };
 
-    computedRoadmap.nextBestAction = this.nbaService.selectNextBestAction(computedRoadmap);
+    const computedPhase = this.phasePlanner.generateNextPhase({
+      directionName: pathDef.title,
+      workModel: simWorkModel,
+      completedPhases: profile.completedPhases || [],
+      curriculum: pathDef,
+      gapResults,
+      targetEcosystem,
+    });
+
+    const computedRoadmap = this.buildRoadmapFromPhase(
+      profile,
+      computedPhase,
+      profile.completedPhases || [],
+      pathDef.title,
+      pathDef.id,
+      pathDef.id,
+      "catalog"
+    );
 
     // Compute Diff against Base Roadmap
     const baseHours = baseRoadmap?.totalEstimatedHours || 0;
@@ -2278,6 +2507,7 @@ export class LearningOrchestrator {
     completedPhase: RoadmapPhase;
     nextDecision: PlanningDecision;
     nextPhase: RoadmapPhase | null;
+    roadmap?: Roadmap | null;
   }> {
     const profileId = submission.profileId || "demo_learner_1";
     const profile = await this.profileRepo.getProfile(profileId);
@@ -2344,14 +2574,41 @@ export class LearningOrchestrator {
     await this.decisionRepo.saveDecision(nextDecision);
 
     let nextPhase: RoadmapPhase | null = null;
+    let updatedRoadmap: Roadmap | null = null;
+
     if (nextDecision.mode === "commit") {
       nextPhase = this.phasePlanner.generateNextPhase({
         directionName: targetDirection,
         workModel: engineResult.updatedWorkModel,
-        completedPhases: profile.completedPhases,
+        completedPhases: profile.completedPhases || [],
       });
       profile.activePhase = nextPhase;
       await this.phaseRepo.savePhase(profileId, nextPhase);
+
+      updatedRoadmap = this.buildRoadmapFromPhase(
+        profile,
+        nextPhase,
+        profile.completedPhases || [],
+        targetDirection,
+        profile.selectedPathId
+      );
+      await this.roadmapRepo.saveRoadmap(updatedRoadmap);
+      profile.activeRoadmapId = updatedRoadmap.id;
+    } else {
+      // Non-commit branch: nextDecision is DISAMBIGUATE or EXPLORE!
+      // Do NOT create Phase N+1!
+      profile.activePhase = null;
+      if (profile.activeRoadmapId) {
+        const currRm = await this.roadmapRepo.getRoadmap(profile.activeRoadmapId);
+        if (currRm) {
+          currRm.milestones = (profile.completedPhases || []).map((p) =>
+            this.phaseToMilestone(p, "completed")
+          );
+          currRm.currentPhase = null;
+          await this.roadmapRepo.saveRoadmap(currRm);
+          updatedRoadmap = currRm;
+        }
+      }
     }
 
     await this.profileRepo.saveProfile(profile);
@@ -2371,6 +2628,7 @@ export class LearningOrchestrator {
       completedPhase: activePhase,
       nextDecision,
       nextPhase,
+      roadmap: updatedRoadmap,
     };
   }
 
@@ -2468,6 +2726,18 @@ export class LearningOrchestrator {
       });
       profile.activePhase = nextPhase;
       await this.phaseRepo.savePhase(profileId, nextPhase);
+
+      const updatedRoadmap = this.buildRoadmapFromPhase(
+        profile,
+        nextPhase,
+        profile.completedPhases || [],
+        profile.declaredTargetRole || "Software Engineering",
+        profile.selectedPathId
+      );
+      await this.roadmapRepo.saveRoadmap(updatedRoadmap);
+      profile.activeRoadmapId = updatedRoadmap.id;
+    } else {
+      profile.activePhase = null;
     }
 
     await this.profileRepo.saveProfile(profile);
@@ -2525,6 +2795,18 @@ export class LearningOrchestrator {
       });
       profile.activePhase = nextPhase;
       await this.phaseRepo.savePhase(profileId, nextPhase);
+
+      const updatedRoadmap = this.buildRoadmapFromPhase(
+        profile,
+        nextPhase,
+        profile.completedPhases || [],
+        profile.declaredTargetRole || "Software Engineering",
+        profile.selectedPathId
+      );
+      await this.roadmapRepo.saveRoadmap(updatedRoadmap);
+      profile.activeRoadmapId = updatedRoadmap.id;
+    } else {
+      profile.activePhase = null;
     }
 
     await this.profileRepo.saveProfile(profile);

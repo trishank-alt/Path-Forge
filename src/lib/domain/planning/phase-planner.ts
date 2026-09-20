@@ -3,9 +3,9 @@ import {
   PracticalProject,
   RoadmapPhase,
   UserWorkModel,
-  SkillGapAnalysisResult,
   TechnologyEcosystem,
 } from "../../contracts";
+import { SkillGapAnalysisResult } from "../learning/skill-gap-service";
 import { Curriculum, toCurriculum } from "../learning/curriculum-model";
 import { PathDefinition, SEEDED_PROJECTS, SEEDED_RESOURCES } from "../../persistence/seed-data";
 import { isProjectCompatible } from "../learning/technology-ecosystem";
@@ -262,9 +262,61 @@ export class PhasePlanner {
       evidenceTargets,
       decisionPoint,
       resources: matchedResources.slice(0, 3),
-      status: "planned",
+      status: "in_progress",
       explanation: `Phase ${phaseNumber} scoped specifically for ${hoursPerWeek}h/week to develop core capabilities while gathering observational evidence for subsequent planning.`,
     };
+  }
+
+  /**
+   * Estimates total curriculum hours for feasibility calculation.
+   */
+  public calculateRequiredHours(
+    target: Curriculum | PathDefinition,
+    gapResults: SkillGapAnalysisResult[]
+  ): number {
+    const activeGaps = gapResults.filter(
+      (g) => g.gap > 0 || g.status === "claimed_unverified"
+    );
+    if (activeGaps.length === 0) return 40;
+
+    const rawId =
+      "source" in target && target.source === "catalog"
+        ? target.id.replace("catalog:", "")
+        : "id" in target
+        ? target.id
+        : "";
+    const phase1Gaps = activeGaps.filter((g) => g.skill.level <= 2);
+    const phase2Gaps = activeGaps.filter(
+      (g) =>
+        g.skill.level === 3 &&
+        (g.skill.domain === "databases" ||
+          g.skill.domain.includes("ecosystem") ||
+          g.skill.domain === "networking" ||
+          g.skill.domain === "devops" ||
+          g.skill.domain === "quality" ||
+          (rawId === "cybersecurity_defensive_redteam" &&
+            (g.skillId === "threat_modeling_owasp" ||
+              g.skillId === "secure_code_review" ||
+              g.skillId === "web_security_mechanisms")))
+    );
+    const phase3Gaps = activeGaps.filter(
+      (g) => !phase1Gaps.includes(g) && !phase2Gaps.includes(g)
+    );
+
+    const milestoneGroups: { gaps: SkillGapAnalysisResult[] }[] = [];
+    if (phase1Gaps.length > 0) milestoneGroups.push({ gaps: phase1Gaps });
+    if (phase2Gaps.length > 0) milestoneGroups.push({ gaps: phase2Gaps });
+    if (phase3Gaps.length > 0) milestoneGroups.push({ gaps: phase3Gaps });
+
+    if (milestoneGroups.length === 0 && activeGaps.length > 0) {
+      milestoneGroups.push({ gaps: activeGaps });
+    }
+
+    let cumulativeHours = 0;
+    for (const group of milestoneGroups) {
+      cumulativeHours += Math.max(10, group.gaps.length * 10);
+    }
+    return cumulativeHours || 120;
   }
 }
 

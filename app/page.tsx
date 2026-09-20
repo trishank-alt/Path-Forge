@@ -521,20 +521,30 @@ export default function Home() {
     }
   };
 
-  const handleCompleteMilestone = (milestoneId: string) => {
+  const handleCompleteMilestone = async (milestoneId: string) => {
     if (!roadmap) return;
-    const updated = {
-      ...roadmap,
-      milestones: roadmap.milestones.map((m) =>
-        m.id === milestoneId
-          ? {
-              ...m,
-              status: (m.status === "completed" ? "in_progress" : "completed") as any,
-            }
-          : m
-      ),
-    };
-    setRoadmap(updated);
+    try {
+      setIsLoading(true);
+      const res = await fetch(`/api/v1/profiles/me/phases/${milestoneId}/submit`, {
+        method: "POST",
+        headers: getHeaders(),
+        body: JSON.stringify({
+          notes: `Completed phase deliverable for milestone ${milestoneId}`,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.profile) setProfile(data.profile);
+        if (data.roadmap) setRoadmap(data.roadmap);
+        if (data.nextDecision?.mode === "disambiguate" && data.nextDecision.activeQuestion?.selectedQuestion) {
+          setActiveQuestion(data.nextDecision.activeQuestion.selectedQuestion.dimension);
+        }
+      }
+    } catch (err) {
+      console.error("Error submitting phase completion:", err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (

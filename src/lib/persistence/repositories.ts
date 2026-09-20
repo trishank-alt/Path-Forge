@@ -228,7 +228,9 @@ export class DecisionRepository {
 export class PhaseRepository {
   public async savePhase(profileId: string, phase: RoadmapPhase): Promise<void> {
     const list = dataStore.phases.get(profileId) || [];
-    const existingIdx = list.findIndex((p) => p.id === phase.id);
+    const existingIdx = list.findIndex(
+      (p) => p.id === phase.id || (p.phaseNumber === phase.phaseNumber && p.status !== "completed")
+    );
     if (existingIdx >= 0) {
       list[existingIdx] = JSON.parse(JSON.stringify(phase));
     } else {

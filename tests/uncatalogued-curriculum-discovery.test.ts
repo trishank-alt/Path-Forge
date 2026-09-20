@@ -181,8 +181,8 @@ async function runTests() {
   assert.equal(r3_final.decision.curriculumSource, "constructed");
   assert.ok(r3_final.decision.curriculumId !== null);
   assert.ok(r3_final.roadmap !== null);
-  assert.ok(r3_final.roadmap.milestones.length >= 3);
-  assert.ok(r3_final.roadmap.milestones.some(m => m.title.toLowerCase().includes("pytorch") || m.title.toLowerCase().includes("math") || m.title.toLowerCase().includes("ml")));
+  assert.strictEqual(r3_final.roadmap.milestones.length, 1);
+  assert.ok(r3_final.roadmap.milestones.some(m => m.title.toLowerCase().includes("pytorch") || m.title.toLowerCase().includes("math") || m.title.toLowerCase().includes("ml") || m.title.toLowerCase().includes("phase 1")));
 
   // ============================================================================
   // TEST 4: UNCATALOGUED GOAL ("Data Scientist")
@@ -242,7 +242,7 @@ async function runTests() {
   assert.equal(r6_final.decision.eligibility, "eligible");
   assert.equal(r6_final.decision.curriculumSource, "constructed");
   assert.ok(r6_final.roadmap !== null);
-  assert.ok(r6_final.roadmap.milestones.length >= 3);
+  assert.strictEqual(r6_final.roadmap.milestones.length, 1);
 
   // ============================================================================
   // TEST 7: GENUINELY UNSUPPORTED / NONSENSICAL INTENT REJECTION

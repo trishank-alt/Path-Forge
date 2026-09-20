@@ -520,6 +520,8 @@ export const RoadmapSchema = z.object({
   totalEstimatedWeeks: z.number(),
   weeklyPaceHours: z.number(),
   milestones: z.array(MilestoneSchema),
+  currentPhase: z.lazy(() => RoadmapPhaseSchema).nullable().optional(),
+  completedPhases: z.array(z.lazy(() => RoadmapPhaseSchema)).optional(),
   nextBestAction: NextBestActionSchema.nullable(),
   assumptions: z.array(z.string()),
   warnings: z.array(z.string()),

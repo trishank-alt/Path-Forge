@@ -37,6 +37,16 @@ export interface Curriculum {
   provenance: ResourceProvenance;
 }
 
+export function toCurriculum(
+  target: Curriculum | PathDefinition,
+  ecosystem: TechnologyEcosystem = "agnostic"
+): Curriculum {
+  if ("source" in target && (target.source === "catalog" || target.source === "constructed")) {
+    return target;
+  }
+  return catalogPathToCurriculum(target as PathDefinition, ecosystem);
+}
+
 /**
  * Adapts a predefined catalog PathDefinition into the unified Curriculum representation.
  * Zero LLM calls. References static catalog data pools without mutation.
