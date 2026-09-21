@@ -61,13 +61,21 @@ export class UserWorkModelManager {
     const isNegative =
       evidence.status === "weakening" ||
       evidence.status === "contradicted" ||
+      dim.includes("rejection") ||
+      dim.includes("disliked") ||
+      dim.includes("avoided") ||
       valStr.toLowerCase().includes("dislike") ||
       valStr.toLowerCase().includes("hate") ||
       valStr.toLowerCase().includes("avoid") ||
-      valStr.toLowerCase().includes("not interested");
+      valStr.toLowerCase().includes("not interested") ||
+      valStr.toLowerCase().includes("don't want") ||
+      valStr.toLowerCase().includes("dont want") ||
+      valStr.toLowerCase().includes("do not want") ||
+      valStr.toLowerCase().includes("no longer want") ||
+      valStr.toLowerCase().includes("stop doing");
 
     // 1. Track negative signals strictly per dimension
-    if (isNegative) {
+    if (isNegative || dim.startsWith("direction:")) {
       if (!this.model.negativeSignals[dim]) {
         this.model.negativeSignals[dim] = [];
       }
@@ -155,13 +163,13 @@ export class UserWorkModelManager {
       }
     }
 
-    // 3b. Direction continuity dimensions
-    else if (dim === "direction:continuity") {
-      if (!this.model.negativeSignals["direction:continuity"]) {
-        this.model.negativeSignals["direction:continuity"] = [];
+    // 3b. Direction continuity and rejection dimensions
+    else if (dim.startsWith("direction:") || dim === "direction") {
+      if (!this.model.negativeSignals[dim]) {
+        this.model.negativeSignals[dim] = [];
       }
-      if (!this.model.negativeSignals["direction:continuity"].includes(valStr)) {
-        this.model.negativeSignals["direction:continuity"].push(valStr);
+      if (!this.model.negativeSignals[dim].includes(valStr)) {
+        this.model.negativeSignals[dim].push(valStr);
       }
     }
 

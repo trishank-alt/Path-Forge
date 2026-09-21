@@ -173,6 +173,7 @@ export default function Home() {
 
       const translation = translateDecisionToDialogue({
         userMessage: message,
+        intent: data.intent || null,
         decision: latestDecision,
         activePhase: data.profile?.activePhase || null,
         previousPhase: prevPhase,
@@ -279,6 +280,7 @@ export default function Home() {
 
       const translation = translateDecisionToDialogue({
         userMessage: answerText,
+        intent: data.intent || null,
         decision: latestDecision,
         activePhase: data.profile?.activePhase || null,
         previousPhase: prevPhase,

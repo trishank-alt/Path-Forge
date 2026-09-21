@@ -4,6 +4,9 @@ import {
   UserWorkModel,
   QuestionDecision,
 } from "../contracts";
+import { ConversationalIntent } from "../domain/intent/conversational-intent";
+import { intentClassifier } from "../domain/intent/intent-classifier";
+import { sanitizeSuggestedChips } from "./chip-sanitizer";
 
 export interface InlinePlanningEvent {
   type: "plan_updated" | "new_phase" | "experiment_proposed" | "phase_completed";
@@ -20,7 +23,8 @@ export interface InlinePlanningEvent {
 }
 
 export interface DialogueTranslationInput {
-  userMessage: string;
+  userMessage?: string;
+  intent?: ConversationalIntent | null;
   decision?: PlanningDecision | null;
   activePhase?: RoadmapPhase | null;
   previousPhase?: RoadmapPhase | null;
@@ -39,7 +43,7 @@ export interface DialogueTranslationResult {
 
 /**
  * Pure presentation-only translator.
- * Takes the resulting planning decision and state from the deterministic engine
+ * Takes structured planning decision, conversational intent, and state
  * and translates it into natural, thoughtful conversational responses and lightweight events.
  *
  * It NEVER makes planning decisions or evaluates thresholds independently.
@@ -47,8 +51,24 @@ export interface DialogueTranslationResult {
 export function translateDecisionToDialogue(
   input: DialogueTranslationInput
 ): DialogueTranslationResult {
+  const result = evaluateDialogue(input);
+  const userMsg = input.userMessage || "";
+  const intentType = input.intent?.type;
+
+  return {
+    ...result,
+    suggestedChips: sanitizeSuggestedChips(result.suggestedChips, {
+      userMessage: userMsg,
+      intentType,
+    }),
+  };
+}
+
+function evaluateDialogue(
+  input: DialogueTranslationInput
+): DialogueTranslationResult {
   const {
-    userMessage,
+    userMessage = "",
     decision,
     activePhase,
     previousPhase,
@@ -56,10 +76,16 @@ export function translateDecisionToDialogue(
     isInitialGreeting,
   } = input;
 
-  const msgLower = (userMessage || "").toLowerCase().trim();
+  // Derive intent from structured input or fallback to classifier if caller passed raw message
+  const intent: ConversationalIntent =
+    input.intent ||
+    intentClassifier.classify(userMessage, {
+      activePhase,
+      expectedDimension: activeQuestion?.selectedQuestion?.dimension,
+    });
 
   // 1. Initial Greeting / Discovery Welcome
-  if (isInitialGreeting || !msgLower) {
+  if (isInitialGreeting || (!userMessage && !decision && !activePhase)) {
     return {
       replyText:
         "Hi, I'm PathForge. I'm here to help you figure out what engineering work genuinely fits you through conversation, practical exploration, and adaptive learning.\n\nTo get started, what kinds of problems, technology, or projects are you curious about?",
@@ -73,7 +99,7 @@ export function translateDecisionToDialogue(
     };
   }
 
-  // 2. Phase Superseded (Directional Pivot / Material Incompatibility)
+  // 2. Phase Superseded (Directional Pivot / Material Incompatibility evaluated by DecisionEngine)
   if (
     decision?.phaseDisposition === "supersede" &&
     decision.createdPhaseId &&
@@ -120,6 +146,7 @@ export function translateDecisionToDialogue(
   // 4. Initial Sustained Intervention Created
   if (
     decision?.mode === "commit" &&
+    decision?.createdPhaseId &&
     !previousPhase &&
     activePhase
   ) {
@@ -160,23 +187,6 @@ export function translateDecisionToDialogue(
 
   // 6. Targeted Disambiguation (DecisionMode = DISAMBIGUATE or activeQuestion)
   if (decision?.mode === "disambiguate" || activeQuestion?.selectedQuestion) {
-    // Check if user mentioned tediousness
-    if (msgLower.includes("tedious") || msgLower.includes("boring") || msgLower.includes("repetitive")) {
-      return {
-        replyText:
-          "Backend feeling tedious is useful information, but I wouldn't throw away the direction based on that alone.\n\nWhat part feels tedious to you?",
-        suggestedChips: [
-          "Building APIs",
-          "Databases & Schemas",
-          "Debugging & Logging",
-          "Backend work in general",
-          "Something else",
-        ],
-        transparentReasoning:
-          "User expressed tedium. Decision Engine selected DISAMBIGUATE to isolate the root cause before taking action.",
-      };
-    }
-
     const q = activeQuestion?.selectedQuestion;
     if (q) {
       return {
@@ -187,14 +197,94 @@ export function translateDecisionToDialogue(
     }
   }
 
-  // 7. Conversational Dialogue with Phase Continuity (DecisionMode = CONTINUE / no phase mutation)
-  // Scenario A: Difficulty / Struggle
-  if (
-    msgLower.includes("difficult") ||
-    msgLower.includes("struggling") ||
-    msgLower.includes("hard") ||
-    msgLower.includes("stuck")
-  ) {
+  // 7. Structured Interaction Intent Presentation (Presentation Layer Only)
+
+  // 7A. Unspecified Pivot Request
+  if (intent.type === "pivot_request" && !intent.hasExplicitRejection) {
+    return {
+      replyText:
+        "Absolutely. Before we change the plan, what are you thinking of moving toward? It can be a specific field, a type of work, or something you're only vaguely curious about.",
+      suggestedChips: [
+        "I have another field in mind",
+        "I have a type of work in mind",
+        "I'm not sure yet",
+      ],
+      transparentReasoning:
+        "User signaled intent to reconsider direction without specifying a destination. Preserving active phase and gathering candidate alternatives.",
+    };
+  }
+
+  // 7B. Pace Adjustment Inquiry & Selection
+  if (intent.type === "pace_adjustment") {
+    if (intent.pacePreference) {
+      return {
+        replyText:
+          "I've factored that pace preference into your planning constraints. We will adjust the weekly expectation accordingly.",
+        suggestedChips: activePhase
+          ? [
+              "Let's review the current deliverable",
+              "I want to change direction",
+              "Can we adjust the pace?",
+            ]
+          : [
+              "I want to build web applications",
+              "I'm interested in cloud & APIs",
+              "I want to explore data & AI",
+            ],
+        transparentReasoning:
+          `User specified pace preference: '${intent.pacePreference}'. Updated capacity constraint in UserWorkModel.`,
+      };
+    }
+
+    return {
+      replyText:
+        "We can easily adjust the pace to fit your schedule. Would you prefer to reduce your weekly time commitment to keep things manageable, or accelerate the timeline?",
+      suggestedChips: [
+        "Reduce weekly hours (easier pace)",
+        "Increase weekly hours (faster pace)",
+        "Keep current pace as is",
+      ],
+      transparentReasoning:
+        "User inquired about pace adjustment. Preserving phase while gathering capacity preferences.",
+    };
+  }
+
+  // 7C. Deliverable Review
+  if (intent.type === "deliverable_review") {
+    if (intent.deliverableFeedback === "change_project") {
+      return {
+        replyText:
+          "Noticed that this project isn't resonating with you. What kind of engineering project would feel more engaging or relevant to your goals?",
+        suggestedChips: [
+          "Something with a visual frontend",
+          "A command-line tool or automation script",
+          "Working directly with real-world datasets",
+          "Can we break it into smaller steps?",
+        ],
+        transparentReasoning:
+          "User requested a different project. Gathering practical interest signals to adapt intervention within DecisionEngine.",
+      };
+    }
+
+    const deliverableText =
+      activePhase?.project?.description ||
+      activePhase?.project?.title ||
+      "a practical project milestone testing real engineering skills";
+
+    return {
+      replyText: `Here is what we're working toward in this phase:\n\n${deliverableText}\n\nThis deliverable is designed to provide observable evidence of your practical problem-solving in this domain. How is your progress coming along?`,
+      suggestedChips: [
+        "I'm working on it now",
+        "Can we break it into smaller steps?",
+        "I'd like a different project",
+      ],
+      transparentReasoning:
+        "User requested review of current deliverable. Presenting practical requirements and measurement value.",
+    };
+  }
+
+  // 7D. Difficulty / Struggle
+  if (intent.type === "difficulty") {
     return {
       replyText:
         "That sounds more like difficulty with the current material than a change in direction. Let's adjust how we approach this phase rather than abandoning it.\n\nWhich specific concepts are feeling tough—is it the data modeling, asynchronous flow, or the overall setup?",
@@ -209,31 +299,38 @@ export function translateDecisionToDialogue(
     };
   }
 
-  // Scenario C: Side Interest
-  if (
-    (msgLower.includes("also interested in") || msgLower.includes("interested in ai")) &&
-    activePhase
-  ) {
-    return {
-      replyText:
-        "That's great—AI engineering and backend systems actually share many foundational engineering principles in data flow, API architecture, and performance. For now, let's keep your current phase focused on these core fundamentals, and we can look at introducing an AI-focused experiment or project later.",
-      suggestedChips: [
-        "Sounds good, keep current focus",
-        "Can we do a small AI experiment later?",
-        "What concepts overlap between both?",
-      ],
-      transparentReasoning:
-        "User expressed secondary interest. In accordance with invariant M, side interests do NOT supersede the active phase. Phase preserved.",
-    };
+  // 7E. Comparative Interest / Side Interest without Rejection
+  if (intent.type === "free_form_evidence" && intent.pivotTarget) {
+    if (activePhase) {
+      return {
+        replyText:
+          `That's great—${intent.pivotTarget} and your current focus actually share many foundational engineering principles in data flow, architecture, and problem-solving. For now, let's keep your current phase focused on these core fundamentals, and we can look at introducing an exploratory experiment or project later.`,
+        suggestedChips: [
+          "Sounds good, keep current focus",
+          "Can we do a small exploration experiment later?",
+          "What concepts overlap between both?",
+        ],
+        transparentReasoning:
+          `User expressed interest in '${intent.pivotTarget}'. In accordance with the Interest Invariant, side interests do NOT supersede the active phase. Phase preserved.`,
+      };
+    } else {
+      return {
+        replyText:
+          "What makes that area interesting to you? Is it the idea of building intelligent apps, working with models, or automating complex workflows?",
+        suggestedChips: [
+          "Building intelligent user apps",
+          "Working directly with models & prompts",
+          "Automating workflows & pipelines",
+          "Something else",
+        ],
+        transparentReasoning:
+          "User mentioned a possible direction in discovery. Captured as interest signal without prematurely manufacturing a roadmap phase.",
+      };
+    }
   }
 
-  // Scenario H: Discovery with unknown career
-  if (
-    msgLower.includes("no idea") ||
-    msgLower.includes("don't know") ||
-    msgLower.includes("confused") ||
-    msgLower.includes("not sure")
-  ) {
+  // 7F. Discovery Uncertainty
+  if (intent.type === "uncertainty") {
     return {
       replyText:
         "That's completely fine—figuring that out is exactly what we're here for. You don't need to know your destination upfront.\n\nLet's start from what you've actually enjoyed building or doing in the past. What kind of problem solving or tinkering has felt rewarding to you?",
@@ -248,43 +345,7 @@ export function translateDecisionToDialogue(
     };
   }
 
-  // Scenario I: Direction mention without commitment
-  if (
-    msgLower.includes("ai seems interesting") ||
-    msgLower.includes("backend might be interesting") ||
-    msgLower.includes("looks interesting")
-  ) {
-    return {
-      replyText:
-        "What makes that area interesting to you? Is it the idea of building intelligent apps, working with models, or automating complex workflows?",
-      suggestedChips: [
-        "Building intelligent user apps",
-        "Working directly with models & prompts",
-        "Automating workflows & pipelines",
-        "Something else",
-      ],
-      transparentReasoning:
-        "User mentioned a possible direction. Captured as interest signal without prematurely manufacturing a roadmap phase.",
-    };
-  }
-
-  // General Uncertainty / "feels weird"
-  if (msgLower.includes("weird") || msgLower.includes("hate") || msgLower.includes("dislike")) {
-    return {
-      replyText:
-        "That's useful information, but I'm not sure yet whether you dislike the field itself or just the specific tasks we've touched so far. Can you pinpoint which part felt frustrating or unrewarding?",
-      suggestedChips: [
-        "The syntax & setup was annoying",
-        "The problem wasn't interesting",
-        "I don't like working without visuals",
-        "It just didn't click",
-      ],
-      transparentReasoning:
-        "User expressed negative reaction. Gathering specific evidence on root causes before evaluating phase alignment.",
-    };
-  }
-
-  // Default conversational response
+  // 8. Default Conversational Fallback
   return {
     replyText: activePhase
       ? "I've captured that feedback and factored it into your work model. Tell me more about what you're thinking, or let me know if you want to adjust our approach to this phase."

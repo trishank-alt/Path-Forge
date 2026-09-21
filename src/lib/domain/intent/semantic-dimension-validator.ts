@@ -1,4 +1,5 @@
 import { ALLOWED_QUESTION_DIMENSIONS, AllowedQuestionDimension } from "../../contracts";
+import { intentClassifier } from "./intent-classifier";
 
 export interface CareerRoleDetectionResult {
   isRole: boolean;
@@ -243,6 +244,15 @@ export class SemanticDimensionValidator {
         status: "explicit_goal_change",
         proposedGoal: roleDetection.roleName,
         reason: `User explicitly stated intent to change goal to '${roleDetection.roleName}'`,
+      };
+    }
+
+    // If dimension is NOT declared_goal, check if the input is a conversational interaction intent rather than a dimension answer
+    const intent = intentClassifier.classify(raw);
+    if (targetDim !== "declared_goal" && (intent.type === "pivot_request" || intent.type === "pace_adjustment" || intent.type === "deliverable_review")) {
+      return {
+        status: "unknown",
+        reason: `Input '${raw}' represents interaction intent '${intent.type}' rather than an answer to '${dimension}'.`,
       };
     }
 

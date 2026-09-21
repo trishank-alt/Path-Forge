@@ -63,6 +63,8 @@ import {
 } from "../persistence/repositories";
 import { PlanningTransactionCoordinator } from "../persistence/transaction-coordinator";
 import { SEEDED_PATHS, PathDefinition } from "../persistence/seed-data";
+import { IntentClassifier, intentClassifier } from "../domain/intent/intent-classifier";
+import { ConversationalIntent } from "../domain/intent/conversational-intent";
 
 export interface IntakeResponse {
   profile: LearnerProfile;
@@ -75,6 +77,7 @@ export interface IntakeResponse {
   decision: RoadmapDecision;
   pendingGoalChange?: PendingGoalChange | null;
   executionMetadata?: LlmExecutionMetadata | null;
+  intent?: ConversationalIntent | null;
 }
 
 /**
@@ -274,7 +277,7 @@ export class LearningOrchestrator {
   private llmGateway: LlmGateway;
   private curriculumDiscoveryService: CurriculumDiscoveryService;
   private recommendationEngine: RecommendationEngine;
-
+  private intentClassifier: IntentClassifier;
   private evidenceEngine: EvidenceEngine;
   private candidateGenerator: CandidateGenerator;
   private domainKnowledge: DomainKnowledge;
@@ -305,6 +308,7 @@ export class LearningOrchestrator {
     this.llmGateway = new LlmGateway();
     this.curriculumDiscoveryService = new CurriculumDiscoveryService();
     this.recommendationEngine = new RecommendationEngine();
+    this.intentClassifier = intentClassifier;
 
     this.evidenceEngine = new EvidenceEngine();
     this.candidateGenerator = new CandidateGenerator();
@@ -525,7 +529,7 @@ export class LearningOrchestrator {
       source: (f.source as any) || "llm_inference",
       quality: 0.85,
       timestamp: f.createdAt || now,
-      status: "active",
+      status: (f.status as any) || "active",
       provenance: {
         sourceEventId: f.id,
         originalText: f.evidence || String(f.rawValue),
@@ -1139,12 +1143,27 @@ export class LearningOrchestrator {
 
     const activeFacts = profile.facts.filter((f) => f.status === "active");
 
-    // ==========================================
-    // MODE A: ACTIVE CLARIFICATION / RECOMMENDATION
-    // ==========================================
+    const activePhase = profile.activePhase || (await this.phaseRepo.getActivePhase(profileId));
+
+    // Determine if an expected dimension is currently pending
+    let expectedDimension: string | null = null;
+    let curConfidence: ConfidenceBreakdown = profile.intent.confidence || {
+      confidenceScore: 0,
+      knownDimensions: [],
+      missingDimensions: [],
+      missingMaterialDimensions: [],
+      contradictions: [],
+      status: "exploring",
+      questionCount: 0,
+      maxBudget: 5,
+      canGenerateRoadmap: false,
+      dimensionScores: {},
+      reasons: [],
+    };
+
     if (activeFacts.length > 0 && profile.declaredTargetRole) {
       const curHypResult = this.hypothesisEngine.updateHypotheses(profile.facts);
-      const curConfidence = this.confidenceService.evaluateConfidence({
+      curConfidence = this.confidenceService.evaluateConfidence({
         hypotheses: curHypResult.hypotheses,
         facts: profile.facts,
         contradictions: [],
@@ -1156,19 +1175,319 @@ export class LearningOrchestrator {
         isNonCommittalAnswer(String(f.normalizedValue || f.rawValue || ""))
       );
 
-      let expectedDimension: string | null = null;
       if (delegatedFacts.length > 0) {
         expectedDimension = delegatedFacts[delegatedFacts.length - 1].dimension;
       } else if (curConfidence.missingMaterialDimensions.length > 0) {
         expectedDimension = curConfidence.missingMaterialDimensions[0];
       }
+    }
 
-      if (expectedDimension) {
-        const validation = semanticDimensionValidator.validateDimensionAnswer(
-          expectedDimension,
-          request.message,
-          profile.declaredTargetRole
+    // 1. INTENT CLASSIFICATION BEFORE ANY DIMENSION VALIDATION
+    const classifiedIntent = this.intentClassifier.classify(request.message, {
+      expectedDimension,
+      activePhase,
+      declaredRole: profile.declaredTargetRole,
+    });
+
+    // 2. CONVERSATIONAL INTERACTION INTENTS (NON-DIMENSION ANSWERS)
+
+    // A. Unspecified Pivot Request (e.g. "I want to change direction")
+    // Invariant: Unspecified pivot does NOT cause premature phase supersession
+    if (classifiedIntent.type === "pivot_request" && !classifiedIntent.hasExplicitRejection) {
+      const now = new Date().toISOString();
+      const pivotFact: ProfileFact = {
+        id: `fact_pivot_${Date.now()}`,
+        dimension: "direction:pivot_requested",
+        rawValue: "unspecified_pivot",
+        normalizedValue: "unspecified_pivot",
+        source: "user_answer",
+        evidence: request.message,
+        reliability: 0.9,
+        impact: "high",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      profile.facts = [...profile.facts, pivotFact];
+      await this.processEvidenceAndPlan(profile, [pivotFact], request.message, {
+        skipPhaseGeneration: true,
+      });
+
+      const currentRoadmap = profile.activeRoadmapId
+        ? await this.roadmapRepo.getRoadmap(profile.activeRoadmapId)
+        : null;
+
+      const roadmapDecision: RoadmapDecision = {
+        eligibility: activePhase ? "eligible" : "material_uncertainty",
+        selectedPathId: profile.selectedPathId || null,
+        curriculumId: profile.curriculumId || null,
+        curriculumSource: profile.curriculumSource || null,
+        declaredTargetRole: profile.declaredTargetRole,
+        lockedPathReason: null,
+        confidence: curConfidence,
+        feasibility: null,
+        missingMaterialDimensions: curConfidence.missingMaterialDimensions,
+        activeQuestion: null,
+        recommendation: null,
+        pendingGoalChange: null,
+        explanation: "User requested direction reconsideration without destination. Active phase preserved.",
+      };
+
+      await this.profileRepo.saveProfile(profile);
+
+      return {
+        profile,
+        extractedFacts: [pivotFact],
+        confidence: curConfidence,
+        activeQuestion: null,
+        roadmap: currentRoadmap,
+        roadmapEligibility: roadmapDecision.eligibility,
+        feasibility: null,
+        decision: roadmapDecision,
+        intent: classifiedIntent,
+        pendingGoalChange: null,
+        executionMetadata: (llm as any).getLastExecutionMetadata?.() || null,
+      };
+    }
+
+    // B. Explicit Rejection + Target Pivot (e.g. "I don't want backend anymore. I'd like to explore AI.")
+    // Invariant: Explicit rejection + target enters normal planning pipeline and produces SUPERSEDE
+    if (
+      classifiedIntent.type === "pivot_request" &&
+      classifiedIntent.hasExplicitRejection &&
+      classifiedIntent.pivotTarget
+    ) {
+      const now = new Date().toISOString();
+      const rejectedFocus = classifiedIntent.rejectedFocus || (activePhase ? activePhase.objective : "previous direction");
+      const targetRole = classifiedIntent.pivotTarget;
+
+      await this.invalidateDerivedState(profile, targetRole);
+
+      const rejectionFact: ProfileFact = {
+        id: `fact_rej_${Date.now()}`,
+        dimension: "direction:rejection",
+        rawValue: request.message,
+        normalizedValue: request.message,
+        source: "user_answer",
+        evidence: request.message,
+        reliability: 1.0,
+        impact: "high",
+        status: "weakening",
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const targetFact: ProfileFact = {
+        id: `fact_target_${Date.now()}`,
+        dimension: "specialization_focus",
+        rawValue: targetRole,
+        normalizedValue: targetRole,
+        source: "user_answer",
+        evidence: request.message,
+        reliability: 1.0,
+        impact: "high",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const goalFact: ProfileFact = {
+        id: `fact_goal_${Date.now()}`,
+        dimension: "declared_goal",
+        rawValue: targetRole,
+        normalizedValue: targetRole,
+        source: "user_answer",
+        evidence: request.message,
+        reliability: 1.0,
+        impact: "high",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      profile.facts = [...profile.facts, rejectionFact, targetFact, goalFact];
+      this.syncProfilePreferencesAndConstraints(profile);
+
+      const planRes = await this.processEvidenceAndPlan(
+        profile,
+        [rejectionFact, targetFact, goalFact],
+        request.message
+      );
+
+      let updatedRoadmap: Roadmap | null = null;
+      if (planRes.nextPhase) {
+        profile.activePhase = planRes.nextPhase;
+        const allHistory = await this.phaseRepo.getPhaseHistory(profile.id);
+        const priorPhases = allHistory.filter((p) => p.id !== planRes.nextPhase!.id);
+
+        updatedRoadmap = this.buildRoadmapFromPhase(
+          profile,
+          planRes.nextPhase,
+          priorPhases,
+          targetRole,
+          profile.selectedPathId || null,
+          profile.curriculumId,
+          profile.curriculumSource
         );
+        await this.roadmapRepo.saveRoadmap(updatedRoadmap);
+        profile.activeRoadmapId = updatedRoadmap.id;
+      }
+
+      await this.profileRepo.saveProfile(profile);
+
+      const roadmapDecision: RoadmapDecision = {
+        eligibility: "eligible",
+        selectedPathId: profile.selectedPathId || null,
+        curriculumId: profile.curriculumId || null,
+        curriculumSource: profile.curriculumSource || null,
+        declaredTargetRole: targetRole,
+        lockedPathReason: null,
+        confidence: curConfidence,
+        feasibility: null,
+        missingMaterialDimensions: [],
+        activeQuestion: null,
+        recommendation: null,
+        pendingGoalChange: null,
+        explanation: planRes.decision.rationale,
+      };
+
+      return {
+        profile,
+        extractedFacts: [rejectionFact, targetFact, goalFact],
+        confidence: curConfidence,
+        activeQuestion: null,
+        roadmap: updatedRoadmap,
+        roadmapEligibility: "eligible",
+        feasibility: null,
+        decision: roadmapDecision,
+        intent: classifiedIntent,
+        pendingGoalChange: null,
+        executionMetadata: (llm as any).getLastExecutionMetadata?.() || null,
+      };
+    }
+
+    // C. New Interest without Rejection (e.g. "I think AI might be more interesting than this", "Maybe AI")
+    // Invariant: New interest alone does NOT imply rejection; active phase remains IN_PROGRESS
+    if (
+      classifiedIntent.type === "free_form_evidence" &&
+      classifiedIntent.pivotTarget &&
+      !classifiedIntent.hasExplicitRejection &&
+      activePhase
+    ) {
+      const now = new Date().toISOString();
+      const interestFact: ProfileFact = {
+        id: `fact_interest_${Date.now()}`,
+        dimension: "specialization_focus",
+        rawValue: classifiedIntent.pivotTarget,
+        normalizedValue: classifiedIntent.pivotTarget,
+        source: "user_answer",
+        evidence: request.message,
+        reliability: 0.8,
+        impact: "medium",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      profile.facts = [...profile.facts, interestFact];
+      await this.processEvidenceAndPlan(profile, [interestFact], request.message, {
+        skipPhaseGeneration: true,
+      });
+
+      const currentRoadmap = profile.activeRoadmapId
+        ? await this.roadmapRepo.getRoadmap(profile.activeRoadmapId)
+        : null;
+
+      const roadmapDecision: RoadmapDecision = {
+        eligibility: "eligible",
+        selectedPathId: profile.selectedPathId || null,
+        curriculumId: profile.curriculumId || null,
+        curriculumSource: profile.curriculumSource || null,
+        declaredTargetRole: profile.declaredTargetRole,
+        lockedPathReason: null,
+        confidence: curConfidence,
+        feasibility: null,
+        missingMaterialDimensions: curConfidence.missingMaterialDimensions,
+        activeQuestion: null,
+        recommendation: null,
+        pendingGoalChange: null,
+        explanation: "Secondary interest captured as evidence without superseding active phase.",
+      };
+
+      await this.profileRepo.saveProfile(profile);
+
+      return {
+        profile,
+        extractedFacts: [interestFact],
+        confidence: curConfidence,
+        activeQuestion: null,
+        roadmap: currentRoadmap,
+        roadmapEligibility: "eligible",
+        feasibility: null,
+        decision: roadmapDecision,
+        intent: classifiedIntent,
+        pendingGoalChange: null,
+        executionMetadata: (llm as any).getLastExecutionMetadata?.() || null,
+      };
+    }
+
+    // D. Pace Adjustment or Deliverable Review
+    if (classifiedIntent.type === "pace_adjustment" || classifiedIntent.type === "deliverable_review") {
+      const currentRoadmap = profile.activeRoadmapId
+        ? await this.roadmapRepo.getRoadmap(profile.activeRoadmapId)
+        : null;
+
+      if (classifiedIntent.type === "pace_adjustment" && classifiedIntent.pacePreference === "reduce_hours" && activePhase) {
+        const newHours = Math.max(2, Math.round((profile.constraints.hoursPerWeek || 8) * 0.6));
+        profile.constraints.hoursPerWeek = newHours;
+        activePhase.duration.weeklyHours = newHours;
+        await this.phaseRepo.savePhase(profile.id, activePhase);
+      }
+
+      const roadmapDecision: RoadmapDecision = {
+        eligibility: activePhase ? "eligible" : "material_uncertainty",
+        selectedPathId: profile.selectedPathId || null,
+        curriculumId: profile.curriculumId || null,
+        curriculumSource: profile.curriculumSource || null,
+        declaredTargetRole: profile.declaredTargetRole,
+        lockedPathReason: null,
+        confidence: curConfidence,
+        feasibility: null,
+        missingMaterialDimensions: curConfidence.missingMaterialDimensions,
+        activeQuestion: null,
+        recommendation: null,
+        pendingGoalChange: null,
+        explanation: `Conversational affordance '${classifiedIntent.type}' handled contextually.`,
+      };
+
+      await this.profileRepo.saveProfile(profile);
+
+      return {
+        profile,
+        extractedFacts: [],
+        confidence: curConfidence,
+        activeQuestion: null,
+        roadmap: currentRoadmap,
+        roadmapEligibility: roadmapDecision.eligibility,
+        feasibility: null,
+        decision: roadmapDecision,
+        intent: classifiedIntent,
+        pendingGoalChange: null,
+        executionMetadata: (llm as any).getLastExecutionMetadata?.() || null,
+      };
+    }
+
+    // ==========================================
+    // MODE A: ACTIVE CLARIFICATION / RECOMMENDATION
+    // (Only executed if user input is an answer to an active question dimension)
+    // ==========================================
+    if (activeFacts.length > 0 && profile.declaredTargetRole && expectedDimension && classifiedIntent.type === "dimension_answer") {
+      const validation = semanticDimensionValidator.validateDimensionAnswer(
+        expectedDimension,
+        request.message,
+        profile.declaredTargetRole
+      );
 
         // A. Explicit goal-change statement (e.g. "Actually, I want to become a Mobile App Developer")
         if (validation.status === "explicit_goal_change") {
@@ -1224,6 +1543,11 @@ export class LearningOrchestrator {
               gapResults,
               targetEcosystem,
             });
+            if (profile.decisions && profile.decisions.length > 0) {
+              const lastDec = profile.decisions[profile.decisions.length - 1];
+              lastDec.createdPhaseId = activePhase.id;
+              activePhase.createdByDecisionId = lastDec.id;
+            }
             profile.activePhase = activePhase;
             await this.phaseRepo.savePhase(profile.id, activePhase);
 
@@ -1254,6 +1578,7 @@ export class LearningOrchestrator {
             roadmapEligibility: decision.eligibility,
             feasibility: decision.feasibility,
             decision,
+            intent: classifiedIntent,
             pendingGoalChange: null,
             executionMetadata: (llm as any).getLastExecutionMetadata?.() || null,
           };
@@ -1319,6 +1644,7 @@ export class LearningOrchestrator {
             roadmapEligibility: "material_uncertainty",
             feasibility: null,
             decision,
+            intent: classifiedIntent,
             pendingGoalChange,
             executionMetadata: (llm as any).getLastExecutionMetadata?.() || null,
           };
@@ -1327,7 +1653,6 @@ export class LearningOrchestrator {
         // C. Valid domain / language / constraint answer for expected dimension
         return this.answerQuestion(expectedDimension, request.message, profileId, llmConfig);
       }
-    }
 
     // ==========================================
     // MODE B: OPEN INTAKE
@@ -1431,6 +1756,11 @@ export class LearningOrchestrator {
         gapResults,
         targetEcosystem,
       });
+      if (profile.decisions && profile.decisions.length > 0) {
+        const lastDec = profile.decisions[profile.decisions.length - 1];
+        lastDec.createdPhaseId = activePhase.id;
+        activePhase.createdByDecisionId = lastDec.id;
+      }
       profile.activePhase = activePhase;
       await this.phaseRepo.savePhase(profile.id, activePhase);
 
@@ -1485,6 +1815,7 @@ export class LearningOrchestrator {
       roadmapEligibility: decision.eligibility,
       feasibility: decision.feasibility,
       decision,
+      intent: classifiedIntent,
       pendingGoalChange: null,
       executionMetadata: execMeta,
     };
