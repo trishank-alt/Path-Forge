@@ -88,13 +88,14 @@ export function Navigation({
         <div className="flex items-center gap-1 p-1 bg-slate-900/80 rounded-xl border border-slate-800">
           <button
             onClick={() => setActiveTab("roadmap")}
-            className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+            className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 ${
               activeTab === "roadmap"
                 ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shadow-sm"
                 : "text-slate-400 hover:text-slate-200"
             }`}
           >
-            Navigator
+            <Compass className="w-3.5 h-3.5" />
+            <span>Career Map</span>
           </button>
           <button
             onClick={() => setActiveTab("skills")}

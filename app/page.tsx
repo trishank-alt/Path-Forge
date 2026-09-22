@@ -3,7 +3,8 @@
 import React, { useState, useEffect } from "react";
 import { Navigation } from "@/components/Navigation";
 import { IntakeChat, ChatMessageItem } from "@/components/IntakeChat";
-import { CurrentInterventionPanel } from "@/components/CurrentInterventionPanel";
+import { CareerMap } from "@/components/map/CareerMap";
+import { CurrentFocusCard } from "@/components/journey/CurrentFocusCard";
 import { SkillMatrix } from "@/components/SkillMatrix";
 import { ScenarioStudio } from "@/components/ScenarioStudio";
 import { FactInspectorModal } from "@/components/FactInspectorModal";
@@ -551,11 +552,21 @@ export default function Home() {
       {/* Main Dynamic View Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-6 flex flex-col min-h-0">
         {activeTab === "roadmap" && (
-          hasActivePhase ? (
-            /* ACTIVE INTERVENTION STATE: Side-by-Side Dynamic Grid */
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 min-h-[calc(100vh-9.5rem)]">
-              {/* Left Column: Primary Conversation (7 cols desktop, 8 on xl) */}
-              <div className="lg:col-span-7 xl:col-span-8 h-full min-h-[500px]">
+          <div className="flex flex-col gap-6 flex-1 min-h-0">
+            {/* Layer 1: Dominant Interactive Career Map */}
+            <section className="w-full h-[460px] lg:h-[500px] shrink-0" aria-label="Interactive Career Map">
+              <CareerMap
+                profile={profile}
+                onAskAboutSkill={(skill) => {
+                  handleSendMessage(`Can you explain more about ${skill} and how it connects to my learning journey?`);
+                }}
+              />
+            </section>
+
+            {/* Layers 2 & 3: Responsive Bottom Grid: Conversation & Current Focus */}
+            <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 min-h-[480px]">
+              {/* Primary Conversation Panel (7 cols desktop, 8 on xl) */}
+              <div className="lg:col-span-7 xl:col-span-8 flex flex-col h-full min-h-[440px]">
                 <IntakeChat
                   profile={profile}
                   activeQuestion={activeQuestion}
@@ -569,33 +580,17 @@ export default function Home() {
                 />
               </div>
 
-              {/* Right Column: Persistent "What We're Doing" Panel (5 cols desktop, 4 on xl) */}
-              <div className="lg:col-span-5 xl:col-span-4 h-full min-h-[500px]">
-                <CurrentInterventionPanel
-                  roadmap={roadmap}
+              {/* Current Focus & Journey History Panel (5 cols desktop, 4 on xl) */}
+              <div className="lg:col-span-5 xl:col-span-4 flex flex-col h-full min-h-[440px]">
+                <CurrentFocusCard
                   activePhase={profile?.activePhase || null}
                   phaseHistory={profile?.phaseHistory || []}
                   onSubmitWorkAndReflect={handleSubmitWorkAndReflect}
                   isLoading={isLoading}
                 />
               </div>
-            </div>
-          ) : (
-            /* DISCOVERY STATE: Focused Conversation Only (No premature roadmap) */
-            <div className="max-w-3xl w-full mx-auto flex-1 min-h-[calc(100vh-9.5rem)]">
-              <IntakeChat
-                profile={profile}
-                activeQuestion={activeQuestion}
-                messages={chatMessages}
-                onSendMessage={handleSendMessage}
-                onAnswerQuestion={handleAnswerQuestion}
-                isLoading={isLoading}
-                onOpenSettings={() => setIsSettingsOpen(true)}
-                onSwitchToDeterministic={handleSwitchToDeterministic}
-                onRetryLastAction={handleRetryLastAction}
-              />
-            </div>
-          )
+            </section>
+          </div>
         )}
 
         {activeTab === "skills" && (
