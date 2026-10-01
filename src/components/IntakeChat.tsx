@@ -167,8 +167,8 @@ export function IntakeChat({
                 Welcome to PathForge
               </h3>
               <p className="text-xs text-slate-400 leading-relaxed">
-                I'm here to help you figure out what engineering work genuinely fits you.
-                Tell me what problems, technologies, or projects you're thinking about—or share if you're not sure where to begin.
+                I&apos;m here to help you figure out what engineering work genuinely fits you.
+                Tell me what problems, technologies, or projects you&apos;re thinking about—or share if you&apos;re not sure where to begin.
               </p>
             </div>
             <div className="flex flex-wrap justify-center gap-2 pt-2 max-w-lg">

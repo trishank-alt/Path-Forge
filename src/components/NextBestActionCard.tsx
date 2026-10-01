@@ -18,23 +18,21 @@ interface NextBestActionCardProps {
   onExecuteAction: (action: NextBestAction) => void;
 }
 
+function ActionIcon({ type, className }: { type: string; className?: string }) {
+  switch (type) {
+    case "assessment":
+      return <CheckCircle2 className={className} />;
+    case "project_task":
+      return <Code2 className={className} />;
+    case "clarification":
+      return <HelpCircle className={className} />;
+    default:
+      return <BookOpen className={className} />;
+  }
+}
+
 export function NextBestActionCard({ action, onExecuteAction }: NextBestActionCardProps) {
   if (!action) return null;
-
-  const getIcon = () => {
-    switch (action.type) {
-      case "assessment":
-        return CheckCircle2;
-      case "project_task":
-        return Code2;
-      case "clarification":
-        return HelpCircle;
-      default:
-        return BookOpen;
-    }
-  };
-
-  const ActionIcon = getIcon();
 
   return (
     <div className="glass-panel rounded-2xl border border-cyan-500/30 p-4 lg:p-5 glow-cyan bg-gradient-to-r from-slate-900/90 via-indigo-950/40 to-slate-900/90">
@@ -42,7 +40,7 @@ export function NextBestActionCard({ action, onExecuteAction }: NextBestActionCa
         {/* Action Details */}
         <div className="flex items-start gap-3.5">
           <div className="p-2.5 rounded-xl bg-gradient-to-br from-cyan-500 to-indigo-600 text-slate-950 font-bold shadow-md shrink-0">
-            <ActionIcon className="w-5 h-5 text-slate-950" />
+            <ActionIcon type={action.type} className="w-5 h-5 text-slate-950" />
           </div>
 
           <div className="space-y-1">

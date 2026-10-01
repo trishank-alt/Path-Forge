@@ -24,8 +24,24 @@ export function CareerMap({ profile, onAskAboutSkill, className = "" }: CareerMa
 
   // Pan and Zoom State
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
+  const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const updateDimensions = () => {
+      setDimensions({
+        width: el.clientWidth || 800,
+        height: el.clientHeight || 600,
+      });
+    };
+    updateDimensions();
+    const observer = new ResizeObserver(updateDimensions);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // Interactive Selection and Hover State
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -225,8 +241,8 @@ export function CareerMap({ profile, onAskAboutSkill, className = "" }: CareerMa
 
         {/* Scaled & Translated Layer Centered in Container */}
         <g
-          transform={`translate(${containerRef.current ? containerRef.current.clientWidth / 2 + transform.x : transform.x}, ${
-            containerRef.current ? containerRef.current.clientHeight / 2 + transform.y : transform.y
+          transform={`translate(${dimensions.width / 2 + transform.x}, ${
+            dimensions.height / 2 + transform.y
           }) scale(${transform.scale})`}
         >
           {/* 1. Render Edges */}

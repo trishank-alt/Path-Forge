@@ -200,7 +200,7 @@ export function Navigation({
           }
           className="px-2.5 py-1 rounded-lg bg-slate-800/70 hover:bg-slate-800 text-slate-300 border border-slate-700/60 whitespace-nowrap transition-colors"
         >
-          &quot;I'm finding backend difficult&quot;
+          &quot;I&apos;m finding backend difficult&quot;
         </button>
         <button
           onClick={() =>

@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "tsx tests/runtime-single-phase-adaptive.test.ts",
+    "test:all": "tsx tests/frontend-flow.test.ts && tsx tests/runtime-single-phase-adaptive.test.ts && tsx tests/uncatalogued-curriculum-discovery.test.ts && tsx tests/state-routing-and-goal-invalidation.test.ts && tsx tests/technology-compatibility.test.ts && tsx tests/adaptive-phase-evolution.test.ts"
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -25,6 +27,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.1",
     "tailwindcss": "^4",
+    "tsx": "^4.19.0",
     "typescript": "^5"
   }
 }

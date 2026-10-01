@@ -187,7 +187,7 @@ export function FactInspectorModal({
                           {JSON.stringify(fact.normalizedValue)}
                         </div>
                         <div className="text-slate-400 text-[11px] italic">
-                          <strong>Evidence snippet: </strong>"{fact.evidence}"
+                          <strong>Evidence snippet: </strong>&quot;{fact.evidence}&quot;
                         </div>
                       </div>
                     )}

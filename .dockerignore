@@ -1,0 +1,31 @@
+# Git and IDE
+.git
+.github
+.gitignore
+.vscode
+.idea
+
+# Local env files
+.env*.local
+.env.local
+
+# Node modules and build output
+node_modules
+.next
+build
+out
+dist
+
+# Tests and documentation
+tests
+scratch
+src/scratch
+*.log
+*.tsbuildinfo
+npm-debug.log*
+
+# Docs & specs
+architecture.md
+plan.md
+AGENTS.md
+CLAUDE.md

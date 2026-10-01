@@ -1,0 +1,24 @@
+services:
+  pathforge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pathforge-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      # Provide API keys below or in a .env file:
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - PATHFINDER_LLM_PROVIDER=${PATHFINDER_LLM_PROVIDER:-}
+      - PATHFINDER_LLM_MODEL=${PATHFINDER_LLM_MODEL:-}
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
