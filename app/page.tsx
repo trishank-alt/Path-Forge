@@ -11,6 +11,9 @@ import { FactInspectorModal } from "@/components/FactInspectorModal";
 import { SettingsModal } from "@/components/SettingsModal";
 import { DiagnosticQuizModal } from "@/components/DiagnosticQuizModal";
 import { UserAuthModal } from "@/components/UserAuthModal";
+import { AuthScreen } from "@/components/auth/AuthScreen";
+import { AuthUser } from "@/lib/auth/auth-service";
+import { Compass } from "lucide-react";
 import { translateDecisionToDialogue } from "@/lib/conversational/dialogue-translator";
 import {
   LearnerProfile,
@@ -21,12 +24,9 @@ import {
 } from "@/lib/contracts";
 
 export default function Home() {
-  const [learnerId, setLearnerId] = useState<string>(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("pathfinder_learner_id") || "trishank";
-    }
-    return "trishank";
-  });
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [learnerId, setLearnerId] = useState<string>("");
   const [profile, setProfile] = useState<LearnerProfile | null>(null);
   const [roadmap, setRoadmap] = useState<Roadmap | null>(null);
   const [savedRoadmaps, setSavedRoadmaps] = useState<Roadmap[]>([]);
@@ -66,10 +66,15 @@ export default function Home() {
 
   // Load profile and roadmap on initial mount or when learnerId changes
   const loadInitialData = async (targetLearnerId: string = learnerId) => {
+    if (!targetLearnerId) return;
     try {
       const res = await fetch("/api/v1/profiles/me", {
         headers: { "x-learner-id": targetLearnerId },
       });
+      if (res.status === 401) {
+        setCurrentUser(null);
+        return;
+      }
       if (res.ok) {
         const p: LearnerProfile = await res.json();
         setProfile(p);
@@ -110,9 +115,53 @@ export default function Home() {
     }
   };
 
+  // Initial Auth Verification Effect
   useEffect(() => {
-    loadInitialData(learnerId);
-  }, [learnerId]);
+    async function checkCurrentSession() {
+      try {
+        const res = await fetch("/api/v1/auth/me");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.authenticated && data.user) {
+            setCurrentUser(data.user);
+            setLearnerId(data.user.id);
+            loadInitialData(data.user.id);
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("Auth check failed:", err);
+      } finally {
+        setIsAuthLoading(false);
+      }
+      setCurrentUser(null);
+    }
+
+    checkCurrentSession();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/v1/auth/logout", { method: "POST" });
+    } catch (err) {
+      console.error("Logout error:", err);
+    }
+    setCurrentUser(null);
+    setLearnerId("");
+    setProfile(null);
+    setRoadmap(null);
+    setSavedRoadmaps([]);
+    setScenarios([]);
+    setChatMessages([]);
+    setActiveQuestion(null);
+  };
+
+  const handleAuthSuccess = (user: AuthUser) => {
+    setCurrentUser(user);
+    setLearnerId(user.id);
+    setIsAuthLoading(false);
+    loadInitialData(user.id);
+  };
 
   // 1. Send Message
   const handleSendMessage = async (message: string, forceProvider?: "gemini" | "openai" | "deterministic" | "groq") => {
@@ -533,6 +582,25 @@ export default function Home() {
 
   const hasActivePhase = Boolean(profile?.activePhase);
 
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#090d16] text-slate-100">
+        <div className="flex flex-col items-center gap-3">
+          <div className="p-3 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 shadow-xl glow-cyan animate-pulse">
+            <Compass className="w-8 h-8 animate-spin-slow" />
+          </div>
+          <span className="text-xs font-mono tracking-wider text-slate-400 uppercase">
+            Verifying Authentication...
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return <AuthScreen onAuthSuccess={handleAuthSuccess} />;
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100 selection:bg-cyan-500 selection:text-slate-950">
       {/* Top Header Navigation */}
@@ -540,7 +608,9 @@ export default function Home() {
         profile={profile}
         roadmap={roadmap}
         learnerId={learnerId}
+        authUser={currentUser}
         onOpenUserModal={() => setIsUserModalOpen(true)}
+        onLogout={handleLogout}
         onSelectPreset={handleSelectPreset}
         onReset={handleReset}
         onOpenSettings={() => setIsSettingsOpen(true)}
@@ -620,9 +690,9 @@ export default function Home() {
       <UserAuthModal
         isOpen={isUserModalOpen}
         onClose={() => setIsUserModalOpen(false)}
-        currentLearnerId={learnerId}
-        onSwitchLearner={handleSwitchLearner}
+        authUser={currentUser}
         onResetLearner={handleReset}
+        onLogout={handleLogout}
         profile={profile}
       />
 

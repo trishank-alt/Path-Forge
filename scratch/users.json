@@ -1,0 +1,58 @@
+[
+  {
+    "id": "demo_learner_1",
+    "email": "demo@pathforge.ai",
+    "name": "Demo Engineer",
+    "passwordHash": "b2b65b235e6d5fea392223e3cf3adaecacb7b07f7ad89279954dea30a21b954b616d7e240a0034ea28db0ec96130ba191461d9e86c880f272b6f99605ab10378",
+    "salt": "5b330a555cebf55505f8d1ab080c3d30",
+    "createdAt": "2026-10-01T14:32:21.089Z"
+  },
+  {
+    "id": "trishank",
+    "email": "trishank@pathforge.ai",
+    "name": "Trishank",
+    "passwordHash": "b34110d6cee46e291b942e01ea5a403703e0a48641c031812072e976b0975ca3c17d16f7fff5302403bfac69524a97c244e6ae5ead6e6a2bd4d45cacb16e8eb3",
+    "salt": "61e5ba1d06b2e52309bfa7839131bfc3",
+    "createdAt": "2026-10-01T14:32:21.104Z"
+  },
+  {
+    "id": "user_newuser_1790865141691_pathforge_ai_mupmv74e",
+    "email": "newuser_1790865141691@pathforge.ai",
+    "name": "Alex Learner",
+    "passwordHash": "7ba250ba4a1729ebf6cfa7f534d91c6bf0ced76435617a1875d47505a158fc2f64370a245df3c6ef04425b2245c37303f3d4ac008259862ed5ef7918626848e1",
+    "salt": "f2cf873e882f6980b5941fb6c02dbf60",
+    "createdAt": "2026-10-01T14:32:21.710Z"
+  },
+  {
+    "id": "user_newuser_1790865245895_pathforge_ai_mupmxfio",
+    "email": "newuser_1790865245895@pathforge.ai",
+    "name": "Alex Learner",
+    "passwordHash": "2db2a49be74dd5198cdfdac6e5eb61e42bb6c3a972a03674b65bb32aa2664b6340b0652251b987e4133df6f92f93a66df33f4c6d9b58c8628beea3821a1d3b28",
+    "salt": "abf304959eb2a64c4d467bbd523a4df5",
+    "createdAt": "2026-10-01T14:34:05.904Z"
+  },
+  {
+    "id": "user_newuser_1790867016745_pathforge_ai_mupnzdx5",
+    "email": "newuser_1790867016745@pathforge.ai",
+    "name": "Alex Learner",
+    "passwordHash": "41c63896908f5e670b3907921b5b4dd07bbf712a2fed328b1b77a056cd7bc55eedc80c56b4cef6e0e10e39b29572104b1e8255afd33c76720cb9da307a0dc813",
+    "salt": "d6559adb5005f641533eab67bdf7099c",
+    "createdAt": "2026-10-01T15:03:36.761Z"
+  },
+  {
+    "id": "user_newuser_1790867025076_pathforge_ai_mupnzkcg",
+    "email": "newuser_1790867025076@pathforge.ai",
+    "name": "Alex Learner",
+    "passwordHash": "3b4f310f022efe212fdbddb2c76f7f41a2a001fc5869dfeb494cb0bf4f087c74ab3f080a1b62ad63ef8cc713f4b5d498225f70d0371f3d786c3832d79e07864f",
+    "salt": "b56c81e1b46b895ea056d37a79074586",
+    "createdAt": "2026-10-01T15:03:45.088Z"
+  },
+  {
+    "id": "user_fangyuan2334_gmail_com_mupveknb",
+    "email": "fangyuan2334@gmail.com",
+    "name": "Fang Yuan",
+    "passwordHash": "4801ad722af1798a3b208c1a8c23e2b6d7a2acb0875cd169cb376bfec6a2eb74e933b317e96346ba68276ac97c80f10a76c51ca22617e4e83662b363831d5cd4",
+    "salt": "369e73bd68aabc2b4bd90cb49da7ca6f",
+    "createdAt": "2026-10-01T18:31:22.631Z"
+  }
+]

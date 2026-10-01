@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { orchestrator } from "@/lib/application/orchestrator";
 import { ReflectionSubmission } from "@/lib/contracts";
+import { requireAuth } from "@/lib/auth/auth-guard";
 
 export async function POST(
   req: NextRequest,
@@ -8,14 +9,13 @@ export async function POST(
 ) {
   let targetPhaseId = "unknown";
   try {
+    const auth = requireAuth(req);
+    if (auth.errorResponse) return auth.errorResponse;
+
     const { phaseId } = await params;
     targetPhaseId = phaseId;
     const body = await req.json().catch(() => ({}));
-    const learnerId =
-      req.headers.get("x-learner-id") ||
-      req.nextUrl.searchParams.get("learnerId") ||
-      body.profileId ||
-      "demo_learner_1";
+    const learnerId = auth.user.id;
 
     const submission: ReflectionSubmission = {
       phaseId,

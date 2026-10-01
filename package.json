@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "tsx tests/runtime-single-phase-adaptive.test.ts",
-    "test:all": "tsx tests/frontend-flow.test.ts && tsx tests/runtime-single-phase-adaptive.test.ts && tsx tests/uncatalogued-curriculum-discovery.test.ts && tsx tests/state-routing-and-goal-invalidation.test.ts && tsx tests/technology-compatibility.test.ts && tsx tests/adaptive-phase-evolution.test.ts"
+    "test:auth": "tsx tests/user-auth-and-route-protection.test.ts",
+    "test:all": "tsx tests/user-auth-and-route-protection.test.ts && tsx tests/frontend-flow.test.ts && tsx tests/runtime-single-phase-adaptive.test.ts && tsx tests/uncatalogued-curriculum-discovery.test.ts && tsx tests/state-routing-and-goal-invalidation.test.ts && tsx tests/technology-compatibility.test.ts && tsx tests/adaptive-phase-evolution.test.ts"
   },
   "dependencies": {
     "clsx": "^2.1.1",

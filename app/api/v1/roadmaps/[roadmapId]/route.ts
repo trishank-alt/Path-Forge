@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { orchestrator } from "@/lib/application/orchestrator";
+import { requireAuth } from "@/lib/auth/auth-guard";
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ roadmapId: string }> }
 ) {
   try {
+    const auth = requireAuth(req);
+    if (auth.errorResponse) return auth.errorResponse;
+
     const { roadmapId } = await params;
     const roadmap = await orchestrator.getRoadmap(roadmapId);
     if (!roadmap) {

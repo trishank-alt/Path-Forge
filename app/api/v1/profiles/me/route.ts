@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { orchestrator } from "@/lib/application/orchestrator";
+import { requireAuth } from "@/lib/auth/auth-guard";
 
 export async function GET(req: NextRequest) {
   try {
-    const learnerId = req.headers.get("x-learner-id") || req.nextUrl.searchParams.get("learnerId") || "demo_learner_1";
+    const auth = requireAuth(req);
+    if (auth.errorResponse) return auth.errorResponse;
+
+    const learnerId = auth.user.id;
     const profile = await orchestrator.getProfile(learnerId);
     return NextResponse.json(profile);
   } catch (err: any) {
@@ -13,7 +17,10 @@ export async function GET(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const learnerId = req.headers.get("x-learner-id") || req.nextUrl.searchParams.get("learnerId") || "demo_learner_1";
+    const auth = requireAuth(req);
+    if (auth.errorResponse) return auth.errorResponse;
+
+    const learnerId = auth.user.id;
     const profile = await orchestrator.resetState(learnerId);
     return NextResponse.json({ success: true, profile });
   } catch (err: any) {

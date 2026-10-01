@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { orchestrator } from "@/lib/application/orchestrator";
+import { requireAuth } from "@/lib/auth/auth-guard";
 
 export async function POST(req: NextRequest) {
   try {
-    const learnerId = req.headers.get("x-learner-id") || req.nextUrl.searchParams.get("learnerId") || "demo_learner_1";
+    const auth = requireAuth(req);
+    if (auth.errorResponse) return auth.errorResponse;
+
+    const learnerId = auth.user.id;
     const body = await req.json();
     const { roadmapId } = body;
     if (!roadmapId) {

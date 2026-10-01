@@ -10,14 +10,18 @@ import {
   RotateCcw,
   Activity,
   Layers,
+  LogOut,
 } from "lucide-react";
 import { LearnerProfile, Roadmap } from "@/lib/contracts";
+import { AuthUser } from "@/lib/auth/auth-service";
 
 interface NavigationProps {
   profile: LearnerProfile | null;
   roadmap: Roadmap | null;
   learnerId: string;
+  authUser?: AuthUser | null;
   onOpenUserModal: () => void;
+  onLogout?: () => void;
   onSelectPreset: (preset: { title: string; initialMessage: string }) => void;
   onReset: () => void;
   onOpenSettings: () => void;
@@ -30,7 +34,9 @@ export function Navigation({
   profile,
   roadmap,
   learnerId,
+  authUser,
   onOpenUserModal,
+  onLogout,
   onSelectPreset,
   onReset,
   onOpenSettings,
@@ -121,15 +127,26 @@ export function Navigation({
 
         {/* Quick Actions & Modals */}
         <div className="flex items-center gap-2">
-          {/* User / Workspace Switcher */}
+          {/* User / Workspace Badge */}
           <button
             onClick={onOpenUserModal}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 transition-all shadow-sm glow-cyan"
-            title="Switch Learner Workspace or Profile"
+            title={`Active User: ${authUser?.name || learnerId} (${authUser?.email || ""})`}
           >
-            <User className="w-3.5 h-3.5" />
-            <span className="max-w-[90px] truncate">{learnerId}</span>
+            <User className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="max-w-[100px] truncate">{authUser?.name || learnerId}</span>
           </button>
+
+          {/* Sign Out Button */}
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              className="p-1.5 text-xs font-medium rounded-xl glass-card hover:border-rose-500/50 text-slate-400 hover:text-rose-300 transition-colors"
+              title="Sign Out of PathForge"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          )}
 
           {/* Fact Inspector */}
           <button

@@ -126,6 +126,13 @@ PathForge gathers evidence through natural dialogue, asks the highest-value clar
 - **Custom Profile Creation:** Create new learner profiles stored in browser storage.
 - **One-Click Reset:** Clean wipe feature to start fresh with a clean slate.
 
+### 13. Secure User Authentication & Scoped Route Protection
+- **Mandatory Login Gate:** Every user must authenticate before accessing the application dashboard, roadmaps, or APIs. Unauthenticated requests are strictly rejected with HTTP 401 Unauthorized.
+- **Stateless HMAC-SHA256 Sessions:** Uses tamper-proof signed session tokens stored in secure, HttpOnly cookies (`pathforge_session`).
+- **Salted PBKDF2 Password Hashing:** User passwords are encrypted with SHA-512 and unique 16-byte cryptographic salts.
+- **Scoped User Data:** All learner facts, roadmaps, reflections, and scenarios are isolated to the authenticated user ID.
+- **Seeded Evaluation Accounts:** Instant 1-click evaluation access via `demo@pathforge.ai` / `password123`.
+
 ---
 
 ## Supported Seeded Career Tracks
@@ -189,10 +196,14 @@ PathForge comes pre-seeded with 8 comprehensive, production-grade technical care
 
 ## REST API Reference
 
-All endpoints are versioned under `/api/v1`:
+All endpoints are versioned under `/api/v1` and protected by mandatory session authentication:
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
+| `POST` | `/api/v1/auth/register` | Registers a new user with email, password, and name; sets session cookie. |
+| `POST` | `/api/v1/auth/login` | Authenticates credentials and sets secure HttpOnly session cookie. |
+| `GET` | `/api/v1/auth/me` | Returns the currently authenticated user's session profile. |
+| `POST` | `/api/v1/auth/logout` | Clears the session cookie and invalidates client session state. |
 | `POST` | `/api/v1/intake/messages` | Processes a chat message or goal declaration through the intake pipeline. |
 | `GET` | `/api/v1/profiles/me` | Retrieves the active learner profile, intent state, and active roadmap. |
 | `DELETE` | `/api/v1/profiles/me` | Resets the current learner profile back to a clean state. |

@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { orchestrator } from "@/lib/application/orchestrator";
 import { AssessmentSubmissionRequestSchema } from "@/lib/contracts";
+import { requireAuth } from "@/lib/auth/auth-guard";
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ assessmentId: string }> }
 ) {
   try {
+    const auth = requireAuth(req);
+    if (auth.errorResponse) return auth.errorResponse;
+
     const { assessmentId } = await params;
     const body = await req.json();
     const parsed = AssessmentSubmissionRequestSchema.safeParse(body);
@@ -18,7 +22,7 @@ export async function POST(
       );
     }
 
-    const learnerId = req.headers.get("x-learner-id") || req.nextUrl.searchParams.get("learnerId") || "demo_learner_1";
+    const learnerId = auth.user.id;
     const result = await orchestrator.submitAssessment(
       parsed.data.skillId,
       parsed.data.score,

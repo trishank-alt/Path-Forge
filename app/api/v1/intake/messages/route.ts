@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { orchestrator } from "@/lib/application/orchestrator";
 import { IntakeMessageRequestSchema } from "@/lib/contracts";
+import { requireAuth } from "@/lib/auth/auth-guard";
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = requireAuth(req);
+    if (auth.errorResponse) return auth.errorResponse;
+
     const body = await req.json();
     const parsed = IntakeMessageRequestSchema.safeParse(body);
 
@@ -14,7 +18,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const learnerId = req.headers.get("x-learner-id") || req.nextUrl.searchParams.get("learnerId") || "demo_learner_1";
+    const learnerId = auth.user.id;
     const result = await orchestrator.handleIntake(parsed.data, learnerId);
     return NextResponse.json(result);
   } catch (err: any) {
